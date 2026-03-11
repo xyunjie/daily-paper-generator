@@ -2,13 +2,14 @@
 import { onMounted, ref, watch } from "vue";
 import { message } from "ant-design-vue";
 import dayjs, { type Dayjs } from "dayjs";
-import { initDb, listWorkItems, addWorkItem, replaceWorkItems, type WorkItem } from "../db";
+import { initDb, listWorkItems, replaceWorkItems, type WorkItem } from "../db";
 import { buildWeekDates } from "../utils/date";
 import { invoke } from "@tauri-apps/api/core";
 
 interface DailyCard {
   date: Date;
   dateStr: string;
+  weekday: string;
   items: WorkItem[];
 }
 
@@ -18,6 +19,7 @@ const addModalOpen = ref(false);
 const addDate = ref<Dayjs>(dayjs());
 const addContents = ref<string[]>([""]);
 const autoFetchLoading = ref(false);
+const exportLoading = ref(false);
 
 onMounted(async () => {
   try {
@@ -112,7 +114,32 @@ async function handleAutoFetch() {
 }
 
 async function exportWeek() {
-  message.info("导出功能待接入模板");
+  exportLoading.value = true;
+  try {
+    const week = buildWeekDates(new Date());
+    const startDate = week[0].dateStr;
+    const endDate = week[6].dateStr;
+
+    const dayItems = cards.value.map((card) => ({
+      date: card.dateStr,
+      contents: card.items.map((item) => item.content),
+    }));
+
+    await invoke("export_week_report", {
+      startDate,
+      endDate,
+      itemsJson: JSON.stringify(dayItems),
+      employee: "",
+    });
+
+    message.success("周报已保存");
+  } catch (e) {
+    const msg = String(e);
+    if (msg.includes("已取消")) return;
+    message.error(`导出失败: ${e}`);
+  } finally {
+    exportLoading.value = false;
+  }
 }
 </script>
 
@@ -122,12 +149,17 @@ async function exportWeek() {
       <div class="title">本周工作内容</div>
       <div class="actions">
         <a-button type="primary" @click="openAddModal">添加工作内容</a-button>
-        <a-button @click="exportWeek">导出本周工作内容</a-button>
+        <a-button :loading="exportLoading" @click="exportWeek">导出本周工作内容</a-button>
       </div>
     </div>
 
     <div v-if="!loading" class="week-grid">
-      <a-card v-for="card in cards" :key="card.dateStr" :title="card.dateStr" class="day-card">
+      <a-card
+        v-for="card in cards"
+        :key="card.dateStr"
+        :title="`${card.dateStr}（${card.weekday}）`"
+        class="day-card"
+      >
         <div v-if="card.items.length === 0" class="empty-text">暂无记录</div>
         <ul v-else class="work-list">
           <li v-for="item in card.items" :key="item.id">{{ item.content }}</li>
@@ -149,7 +181,7 @@ async function exportWeek() {
         </a-form-item>
         <a-form-item label="工作内容">
           <div class="dynamic-list">
-            <div v-for="(row, index) in addContents" :key="index" class="dynamic-row">
+            <div v-for="(_row, index) in addContents" :key="index" class="dynamic-row">
               <a-input
                 v-model:value="addContents[index]"
                 placeholder="输入一条工作内容"
@@ -164,8 +196,8 @@ async function exportWeek() {
       </a-form>
       <template #footer>
         <a-button @click="addModalOpen = false">取消</a-button>
-        <a-button :loading="autoFetchLoading" @click="handleAutoFetch">自动获取</a-button>
-        <a-button type="primary" :loading="autoFetchLoading" @click="handleAdd">保存</a-button>
+        <a-button :loading="autoFetchLoading" :disabled="autoFetchLoading" @click="handleAutoFetch">自动获取</a-button>
+        <a-button type="primary" :loading="autoFetchLoading" :disabled="autoFetchLoading" @click="handleAdd">保存</a-button>
       </template>
     </a-modal>
   </div>

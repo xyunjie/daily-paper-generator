@@ -1,12 +1,21 @@
-import { addDays, startOfWeek } from "date-fns";
+import { addDays, format, getDay, startOfWeek } from "date-fns";
 import type { Dayjs } from "dayjs";
 
 export function getWeekStart(date: Date) {
+  // 周一作为一周开始
   return startOfWeek(date, { weekStartsOn: 1 });
 }
 
 export function formatDate(date: Date) {
-  return date.toISOString().slice(0, 10);
+  // 使用本地时区格式化，避免 toISOString() 的 UTC 偏移导致日期错一天
+  return format(date, "yyyy-MM-dd");
+}
+
+export function formatWeekday(date: Date) {
+  // date-fns: 0=周日 ... 6=周六
+  const day = getDay(date);
+  const map = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  return map[day] || "";
 }
 
 export function buildWeekDates(baseDate: Date) {
@@ -16,6 +25,7 @@ export function buildWeekDates(baseDate: Date) {
     return {
       date: d,
       dateStr: formatDate(d),
+      weekday: formatWeekday(d),
     };
   });
 }

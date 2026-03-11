@@ -7,6 +7,7 @@ mod report;
 
 use config::AppConfig;
 use report::DailyReport;
+use report::WeeklyWorkItem;
 use simplelog::*;
 use std::fs::File;
 
@@ -74,6 +75,80 @@ fn generate_report(date: String) -> Result<String, String> {
     Ok(file_path)
 }
 
+/// 导出本周工作内容为 docx 周报
+/// items_json: JSON array of { date: string, contents: string[] }
+#[tauri::command]
+fn export_week_report(
+    start_date: String,
+    end_date: String,
+    items_json: String,
+    _employee: String,
+) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct DayItems {
+        date: String,
+        contents: Vec<String>,
+    }
+
+    let day_items: Vec<DayItems> = serde_json::from_str(&items_json)
+        .map_err(|e| format!("解析工作内容失败: {}", e))?;
+
+    let weekly_items: Vec<WeeklyWorkItem> = day_items
+        .into_iter()
+        .map(|d| WeeklyWorkItem { date: d.date, contents: d.contents })
+        .collect();
+
+    report::generate_week_xlsx(&start_date, &end_date, &weekly_items)?;
+
+    let file_name = format!("周报_{}_{}.xlsx", start_date, end_date);
+    let src_path = crate::config::CONFIG_DIR
+        .lock()
+        .unwrap()
+        .join(&file_name);
+
+    // 弹出系统保存对话框，让用户选择保存位置
+    let save_path = rfd::FileDialog::new()
+        .set_file_name(&file_name)
+        .add_filter("Excel 文件", &["xlsx"])
+        .save_file();
+
+    match save_path {
+        Some(dest) => {
+            std::fs::copy(&src_path, &dest)
+                .map_err(|e| format!("保存文件失败: {}", e))?;
+
+            // 保存成功后打开文件所在文件夹并选中文件
+            #[cfg(target_os = "macos")]
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(&dest)
+                .spawn()
+                .ok();
+
+            #[cfg(target_os = "windows")]
+            std::process::Command::new("explorer")
+                .arg("/select,")
+                .arg(&dest)
+                .spawn()
+                .ok();
+
+            #[cfg(target_os = "linux")]
+            {
+                // Linux 上打开文件所在目录
+                if let Some(parent) = dest.parent() {
+                    std::process::Command::new("xdg-open")
+                        .arg(parent)
+                        .spawn()
+                        .ok();
+                }
+            }
+
+            Ok(dest.to_string_lossy().to_string())
+        }
+        None => Err("已取消".to_string()),
+    }
+}
+
 fn init_logger() {
     let log_dir = config::CONFIG_DIR.lock().unwrap().clone();
     let _ = std::fs::create_dir_all(&log_dir);
@@ -100,7 +175,8 @@ pub fn run() {
             save_config,
             load_config,
             fetch_daily_items,
-            generate_report
+            generate_report,
+            export_week_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

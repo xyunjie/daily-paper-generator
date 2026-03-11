@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { message } from "ant-design-vue";
-import dayjs, { type Dayjs } from "dayjs";
+import { type Dayjs } from "dayjs";
 import {
   initDb,
   listWorkDaysPage,
@@ -96,7 +96,7 @@ async function onPageChange(page: number, size: number) {
         pageSize,
         total,
         showSizeChanger: false,
-        showTotal: (t) => `共 ${t} 天`,
+        showTotal: (t: number) => `共 ${t} 天`,
         onChange: onPageChange,
       }"
       :row-class-name="() => 'work-row'"

@@ -52,7 +52,7 @@ pub fn fetch_tasks(config: &AppConfig, date: &str) -> Result<Vec<TaskInfo>, Stri
         urlencoding::encode(&jql)
     );
 
-    let mut response = client
+    let response = client
         .get(&url)
         .bearer_auth(&jira.api_token)
         .header("Accept", "application/json")

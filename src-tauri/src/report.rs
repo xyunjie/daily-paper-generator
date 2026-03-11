@@ -2,11 +2,17 @@ use crate::config::ensure_config_dir;
 use crate::gitlab::CommitInfo;
 use crate::jira::TaskInfo;
 use docx_rs::*;
+use rust_xlsxwriter::*;
 
 pub struct DailyReport {
     pub date: String,
     pub tasks: Vec<TaskInfo>,
     pub commits: Vec<CommitInfo>,
+}
+
+pub struct WeeklyWorkItem {
+    pub date: String,
+    pub contents: Vec<String>,
 }
 
 pub fn generate_docx(report: &DailyReport) -> Result<String, String> {
@@ -108,5 +114,93 @@ pub fn generate_docx(report: &DailyReport) -> Result<String, String> {
         .map_err(|e| format!("Failed to generate docx: {}", e))?;
 
     log::info!("Report generated: {:?}", file_path);
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+pub fn generate_week_xlsx(
+    start_date: &str,
+    end_date: &str,
+    items: &[WeeklyWorkItem],
+) -> Result<String, String> {
+    ensure_config_dir()?;
+
+    let file_name = format!("周报_{}_{}.xlsx", start_date, end_date);
+    let file_path = crate::config::CONFIG_DIR
+        .lock()
+        .unwrap()
+        .join(&file_name);
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+
+    // 表头格式：加粗、居中、细边框
+    let header_format = Format::new()
+        .set_bold()
+        .set_align(FormatAlign::Center)
+        .set_align(FormatAlign::VerticalCenter)
+        .set_border(FormatBorder::Thin);
+
+    // 日期格式：居中、细边框、垂直居中
+    let date_format = Format::new()
+        .set_align(FormatAlign::Center)
+        .set_align(FormatAlign::VerticalCenter)
+        .set_border(FormatBorder::Thin);
+
+    // 内容格式：左对齐、细边框、自动换行
+    let content_format = Format::new()
+        .set_align(FormatAlign::Left)
+        .set_align(FormatAlign::VerticalCenter)
+        .set_text_wrap()
+        .set_border(FormatBorder::Thin);
+
+    // 设置列宽
+    worksheet.set_column_width(0, 15).ok();
+    worksheet.set_column_width(1, 60).ok();
+
+    // 写入表头
+    worksheet.write_string_with_format(0, 0, "日期", &header_format)
+        .map_err(|e| format!("写入表头失败: {}", e))?;
+    worksheet.write_string_with_format(0, 1, "工作内容", &header_format)
+        .map_err(|e| format!("写入表头失败: {}", e))?;
+
+    let mut current_row = 1u32;
+
+    for item in items {
+        let row_count = item.contents.len().max(1);
+        let start_row = current_row;
+        let end_row = current_row + row_count as u32 - 1;
+
+        // 相同日期合并单元格
+        if row_count > 1 {
+            worksheet
+                .merge_range(start_row, 0, end_row, 0, &item.date, &date_format)
+                .map_err(|e| format!("合并单元格失败: {}", e))?;
+        } else {
+            worksheet
+                .write_string_with_format(start_row, 0, &item.date, &date_format)
+                .map_err(|e| format!("写入日期失败: {}", e))?;
+        }
+
+        // 写入工作内容
+        if item.contents.is_empty() {
+            worksheet
+                .write_string_with_format(start_row, 1, "", &content_format)
+                .map_err(|e| format!("写入内容失败: {}", e))?;
+        } else {
+            for (i, content) in item.contents.iter().enumerate() {
+                worksheet
+                    .write_string_with_format(start_row + i as u32, 1, content, &content_format)
+                    .map_err(|e| format!("写入内容失败: {}", e))?;
+            }
+        }
+
+        current_row += row_count as u32;
+    }
+
+    workbook
+        .save(&file_path)
+        .map_err(|e| format!("保存 Excel 文件失败: {}", e))?;
+
+    log::info!("Weekly Excel generated: {:?}", file_path);
     Ok(file_path.to_string_lossy().to_string())
 }

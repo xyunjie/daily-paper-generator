@@ -37,11 +37,27 @@ pub struct GitLabPushData {
     pub commit_title: Option<String>,
 }
 
+fn is_merge_like_commit_title(title: &str) -> bool {
+    let title_lower = title.trim().to_lowercase();
+    title_lower.starts_with("merge ")
+        || title_lower.contains("merge branch")
+        || title_lower.contains("merge pull request")
+        || title_lower.contains("merge remote-tracking")
+}
+
+fn normalize_commit_title(title: &str) -> String {
+    title.trim().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, String> {
     let gitlab = &config.gitlab;
 
-    log::info!("fetch_commits called, user_id='{}', username='{}', base_url='{}'",
-        gitlab.user_id, gitlab.username, gitlab.base_url);
+    log::info!(
+        "fetch_commits called, user_id='{}', username='{}', base_url='{}'",
+        gitlab.user_id,
+        gitlab.username,
+        gitlab.base_url
+    );
 
     if !gitlab.user_id.trim().is_empty() {
         log::info!("Using events API (user_id mode)");
@@ -114,11 +130,21 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
             if commits_response.status().is_success() {
                 if let Ok(commits) = commits_response.json::<Vec<GitLabCommit>>() {
                     for commit in commits {
-                        log::info!("Found commit in {}: {}", project.path_with_namespace, commit.title);
+                        let title = normalize_commit_title(&commit.title);
+                        // 过滤掉合并相关的提交（对齐 events 模式）
+                        if is_merge_like_commit_title(&title) {
+                            continue;
+                        }
+
+                        log::info!(
+                            "Found commit in {}: {}",
+                            project.path_with_namespace,
+                            title
+                        );
                         all_commits.push(CommitInfo {
                             project_name: project.path_with_namespace.clone(),
                             short_id: commit.short_id,
-                            title: commit.title,
+                            title,
                             created_at: commit.created_at,
                             url: commit.web_url,
                         });
@@ -143,8 +169,12 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
     // 所以查某一天要用 after=昨天, before=明天
     let date_obj = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .map_err(|e| format!("Invalid date format: {}", e))?;
-    let after_date = (date_obj - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-    let before_date = (date_obj + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let after_date = (date_obj - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let before_date = (date_obj + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
 
     let url = format!(
         "{}/api/v4/users/{}/events?after={}&before={}&per_page=100",
@@ -202,7 +232,11 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
         {
             if project_response.status().is_success() {
                 if let Ok(project) = project_response.json::<GitLabProject>() {
-                    log::info!("Found project: {} -> {}", project_id, project.path_with_namespace);
+                    log::info!(
+                        "Found project: {} -> {}",
+                        project_id,
+                        project.path_with_namespace
+                    );
                     project_map.insert(*project_id, project.path_with_namespace);
                 }
             }
@@ -211,17 +245,19 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
 
     let mut all_commits: Vec<CommitInfo> = Vec::new();
     for event in &events {
-        let Some(push) = &event.push_data else { continue };
-        let Some(title) = &push.commit_title else { continue };
+        let Some(push) = &event.push_data else {
+            continue;
+        };
+        let Some(title) = &push.commit_title else {
+            continue;
+        };
+        let title = normalize_commit_title(title);
+
         // 过滤掉合并相关的提交
-        let title_lower = title.to_lowercase();
-        if title_lower.starts_with("merge ")
-            || title_lower.contains("merge branch")
-            || title_lower.contains("merge pull request")
-            || title_lower.contains("merge remote-tracking")
-        {
+        if is_merge_like_commit_title(&title) {
             continue;
         }
+
         let project_name = event
             .project_id
             .as_ref()
@@ -233,7 +269,7 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
         all_commits.push(CommitInfo {
             project_name,
             short_id: "".to_string(),
-            title: title.clone(),
+            title,
             created_at: "".to_string(),
             url: "".to_string(),
         });
