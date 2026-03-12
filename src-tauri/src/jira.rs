@@ -83,9 +83,3 @@ pub fn fetch_tasks(config: &AppConfig, date: &str) -> Result<Vec<TaskInfo>, Stri
     log::info!("Fetched {} Jira tasks", tasks.len());
     Ok(tasks)
 }
-
-fn increment_date(date: &str) -> String {
-    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map(|d| (d + chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|_| format!("{}T23:59:59", date))
-}

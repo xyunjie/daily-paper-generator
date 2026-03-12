@@ -21,12 +21,14 @@ pub struct CommitInfo {
     pub project_name: String,
     pub short_id: String,
     pub title: String,
+    #[allow(dead_code)]
     pub created_at: String,
     pub url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitLabEvent {
+    #[allow(dead_code)]
     pub action_name: Option<String>,
     pub project_id: Option<u64>,
     pub push_data: Option<GitLabPushData>,

@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    usersacceptedpublicgithubdaily_paper_generator_lib::run()
+    daily_paper_tool_lib::run()
 }
