@@ -10,9 +10,13 @@ pub struct GitLabProject {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitLabCommit {
+    pub id: String,
     pub short_id: String,
     pub title: String,
+    pub message: Option<String>,
     pub created_at: String,
+    pub authored_date: Option<String>,
+    pub author_name: Option<String>,
     pub web_url: String,
 }
 
@@ -37,6 +41,9 @@ pub struct GitLabEvent {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitLabPushData {
     pub commit_title: Option<String>,
+    pub commit_to: Option<String>,
+    pub commit_from: Option<String>,
+    pub commit_count: Option<u32>,
 }
 
 fn is_merge_like_commit_title(title: &str) -> bool {
@@ -209,11 +216,29 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
 
     log::info!("GitLab events count: {}", events.len());
 
-    let mut project_ids: Vec<u64> = events
-        .iter()
-        .filter(|e| e.push_data.is_some())
-        .filter_map(|e| e.project_id)
-        .collect();
+    // 收集所有 push events 的信息
+    struct PushInfo {
+        project_id: u64,
+        commit_to: String,
+        commit_from: Option<String>,
+        commit_count: u32,
+    }
+
+    let mut push_infos: Vec<PushInfo> = Vec::new();
+    for event in &events {
+        let Some(push) = &event.push_data else { continue; };
+        let Some(project_id) = event.project_id else { continue; };
+        let Some(commit_to) = &push.commit_to else { continue; };
+        push_infos.push(PushInfo {
+            project_id,
+            commit_to: commit_to.clone(),
+            commit_from: push.commit_from.clone(),
+            commit_count: push.commit_count.unwrap_or(1),
+        });
+    }
+
+    // 获取涉及的项目信息
+    let mut project_ids: Vec<u64> = push_infos.iter().map(|p| p.project_id).collect();
     project_ids.sort();
     project_ids.dedup();
 
@@ -245,36 +270,92 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
         }
     }
 
+    // 对每个 push event 获取完整的 commit 信息
     let mut all_commits: Vec<CommitInfo> = Vec::new();
-    for event in &events {
-        let Some(push) = &event.push_data else {
-            continue;
-        };
-        let Some(title) = &push.commit_title else {
-            continue;
-        };
-        let title = normalize_commit_title(title);
+    let mut seen_shas: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        // 过滤掉合并相关的提交
-        if is_merge_like_commit_title(&title) {
-            continue;
-        }
-
-        let project_name = event
-            .project_id
-            .as_ref()
-            .and_then(|id| project_map.get(id).cloned())
+    for push in &push_infos {
+        let project_name = project_map
+            .get(&push.project_id)
+            .cloned()
             .unwrap_or_else(|| "unknown".to_string());
 
-        log::info!("Found commit: [{}] {}", project_name, title);
+        // 获取这个 push 的所有 commits
+        let commits_url = format!(
+            "{}/api/v4/projects/{}/repository/commits?ref_name={}&per_page={}",
+            gitlab.base_url.trim_end_matches('/'),
+            push.project_id,
+            push.commit_to,
+            push.commit_count
+        );
 
-        all_commits.push(CommitInfo {
-            project_name,
-            short_id: "".to_string(),
-            title,
-            created_at: "".to_string(),
-            url: "".to_string(),
-        });
+        log::info!("Fetching commits for push: {}", commits_url);
+
+        if let Ok(response) = client
+            .get(&commits_url)
+            .header("PRIVATE-TOKEN", &gitlab.private_token)
+            .header("Accept", "application/json")
+            .send()
+        {
+            if response.status().is_success() {
+                if let Ok(commits) = response.json::<Vec<GitLabCommit>>() {
+                    for commit in commits {
+                        // 如果已经处理过这个 commit，跳过
+                        if seen_shas.contains(&commit.id) {
+                            continue;
+                        }
+
+                        // 如果 commit_from 不为 null，过滤掉 commit_from 之前的 commits（不包括 commit_from 本身）
+                        if let Some(from) = &push.commit_from {
+                            if commit.id == *from {
+                                break;
+                            }
+                        }
+
+                        // 过滤：只保留当天的提交
+                        let commit_date = commit.authored_date.as_ref().or(Some(&commit.created_at));
+                        if let Some(commit_datetime) = commit_date {
+                            // 提取日期部分（YYYY-MM-DD）
+                            let commit_date_str = &commit_datetime[..10];
+                            if commit_date_str != date {
+                                log::debug!("Skipping commit {} (date mismatch: {} != {})", commit.short_id, commit_date_str, date);
+                                continue;
+                            }
+                        }
+
+                        // 过滤：只保留指定用户的提交（如果配置了 username）
+                        if !gitlab.username.trim().is_empty() {
+                            if let Some(author_name) = &commit.author_name {
+                                if author_name != &gitlab.username {
+                                    log::debug!("Skipping commit {} (author mismatch: {} != {})", commit.short_id, author_name, gitlab.username);
+                                    continue;
+                                }
+                            } else {
+                                log::debug!("Skipping commit {} (no author_name)", commit.short_id);
+                                continue;
+                            }
+                        }
+
+                        let title = normalize_commit_title(&commit.title);
+                        if !is_merge_like_commit_title(&title) {
+                            // 使用完整的 message，如果没有则使用 title
+                            let content = commit.message.as_ref().unwrap_or(&commit.title).clone();
+                            let normalized_content = normalize_commit_title(&content);
+
+                            log::info!("Found commit: [{}] {} ({})", project_name, normalized_content, commit.short_id);
+                            seen_shas.insert(commit.id.clone());
+                            all_commits.push(CommitInfo {
+                                project_name: project_name.clone(),
+                                short_id: commit.short_id,
+                                title: normalized_content,
+                                created_at: commit.created_at,
+                                url: commit.web_url,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 
     log::info!("Total commits found: {}", all_commits.len());
