@@ -22,7 +22,7 @@ fn load_config() -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-fn fetch_daily_items(date: String) -> Result<fetch::FetchedItems, String> {
+async fn fetch_daily_items(date: String) -> Result<fetch::FetchedItems, String> {
     let config = config::load_config()?;
 
     if config.jira.base_url.is_empty() {
@@ -35,7 +35,36 @@ fn fetch_daily_items(date: String) -> Result<fetch::FetchedItems, String> {
         return Err("请先配置用户邮箱".to_string());
     }
 
-    fetch::fetch_daily_items(&config, &date)
+    tauri::async_runtime::spawn_blocking(move || {
+        fetch::fetch_daily_items(&config, &date)
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+#[tauri::command]
+async fn polish_daily_items(date: String, items_json: String) -> Result<Vec<String>, String> {
+    let config = config::load_config()?;
+
+    #[derive(serde::Deserialize)]
+    struct RawItem {
+        content: String,
+        source: String,
+    }
+
+    let raw: Vec<RawItem> = serde_json::from_str(&items_json)
+        .map_err(|e| format!("解析数据失败: {}", e))?;
+
+    let items: Vec<fetch::WorkItemWithSource> = raw
+        .into_iter()
+        .map(|i| fetch::WorkItemWithSource { content: i.content, source: i.source })
+        .collect();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        fetch::polish_daily_items(&config, &date, &items)
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
 }
 
 #[tauri::command]
@@ -149,6 +178,26 @@ fn export_week_report(
     }
 }
 
+#[tauri::command]
+fn get_log_path() -> Result<String, String> {
+    let log_dir = config::CONFIG_DIR.lock().unwrap().clone();
+    let log_path = log_dir.join("daily-paper-generator.log");
+    Ok(log_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn read_log_file() -> Result<String, String> {
+    let log_dir = config::CONFIG_DIR.lock().unwrap().clone();
+    let log_path = log_dir.join("daily-paper-generator.log");
+
+    if !log_path.exists() {
+        return Ok("日志文件不存在".to_string());
+    }
+
+    std::fs::read_to_string(&log_path)
+        .map_err(|e| format!("读取日志文件失败: {}", e))
+}
+
 fn init_logger() {
     let log_dir = config::CONFIG_DIR.lock().unwrap().clone();
     let _ = std::fs::create_dir_all(&log_dir);
@@ -171,12 +220,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .setup(|_app| Ok(()))
         .invoke_handler(tauri::generate_handler![
             save_config,
             load_config,
             fetch_daily_items,
+            polish_daily_items,
             generate_report,
-            export_week_report
+            export_week_report,
+            get_log_path,
+            read_log_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

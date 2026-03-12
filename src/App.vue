@@ -8,6 +8,7 @@ const router = useRouter();
 const activeKey = computed(() => {
   if (route.path === "/records") return "records";
   if (route.path === "/settings") return "settings";
+  if (route.path === "/logs") return "logs";
   return "home";
 });
 
@@ -21,6 +22,10 @@ function goHome() {
 
 function goRecords() {
   router.push("/records");
+}
+
+function goLogs() {
+  router.push("/logs");
 }
 </script>
 
@@ -52,6 +57,14 @@ function goRecords() {
           @click="goSettings"
         >
           配置
+        </a-button>
+        <a-button
+          type="text"
+          class="header-tab"
+          :class="{ active: activeKey === 'logs' }"
+          @click="goLogs"
+        >
+          日志
         </a-button>
       </div>
     </a-layout-header>

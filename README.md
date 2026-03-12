@@ -21,7 +21,7 @@
 
 ### 从 Release 下载
 
-前往 [Releases](https://github.com/accepted./daily-paper-tool/releases) 页面下载对应平台的安装包：
+前往 [Releases](https://github.com/xyunjie/daily-paper-generator/releases) 页面下载对应平台的安装包：
 
 - **macOS**: `.dmg` 文件
 - **Windows**: `.msi` 或 NSIS 安装程序
@@ -40,8 +40,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/accepted./daily-paper-tool.git
-cd daily-paper-tool
+git clone https://github.com/xyunjie/daily-paper-generator.git
+cd daily-paper-generator
 
 # 安装依赖
 pnpm install
@@ -99,25 +99,29 @@ pnpm tauri build
 
 ### 本周工作
 
-首页展示本周（周一至周日）的工作内容卡片：
+首页展示本周（周一至周日）的工作内容卡片，每个卡片底部有三个操作按钮：
 
-1. **添加工作内容** - 点击按钮手动添加工作条目
-2. **自动获取** - 在弹窗中点击「自动获取」，系统会从 Jira 和 GitLab 拉取当日数据
-3. **导出周报** - 点击「导出本周工作内容」生成 Excel 文件
+1. **自动获取** - 从 Jira 和 GitLab 拉取当日原始数据，并标注来源（Jira/GitLab）
+2. **AI润色** - 对已获取的数据进行智能润色，生成规范的工作要点
+3. **编辑** - 手动编辑当日工作内容
+
+**使用流程**：
+- 点击「自动获取」按钮获取原始数据（会显示来源标签）
+- 如需AI优化，点击「AI润色」按钮（需配置模型）
+- 可随时点击「编辑」按钮手动调整内容
+- 点击「导出本周工作内容」生成 Excel 文件
 
 ### 自动获取逻辑
 
-系统按以下优先级生成日报内容：
+**自动获取**：
+- 从 Jira 获取当日完成的任务
+- 从 GitLab 获取代码提交记录
+- 保留原始内容，并标注来源（Jira/GitLab）
 
-1. **AI 润色模式**（配置了模型时）
-   - 合并 Jira 任务和 GitLab 提交信息
-   - 去除 Jira Key、项目路径、提交 Hash 等技术细节
-   - 生成 3-8 条规范的中文工作要点
-
-2. **本地规则模式**（未配置模型时）
-   - 以 Jira 任务摘要为主体
-   - 根据提交数量和类型自动推断工作内容
-   - 按修复/优化/测试/接口等类别归类
+**AI润色**（需配置模型）：
+- 合并 Jira 任务和 GitLab 提交信息
+- 去除 Jira Key、项目路径、提交 Hash 等技术细节
+- 生成 3-8 条规范的中文工作要点
 
 ### 工作记录
 
@@ -176,6 +180,7 @@ CREATE TABLE work_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_date TEXT NOT NULL,      -- 工作日期 YYYY-MM-DD
     content TEXT NOT NULL,        -- 工作内容
+    source TEXT DEFAULT 'manual', -- 来源: jira/gitlab/manual
     created_at TEXT NOT NULL      -- 创建时间
 );
 ```

@@ -36,7 +36,6 @@ pub fn fetch_tasks(config: &AppConfig, date: &str) -> Result<Vec<TaskInfo>, Stri
     let jira = &config.jira;
     let client = Client::new();
 
-    // JQL: 当天状态变更为 Done 且由本人负责的任务（自建 Jira 8.x）
     let start_time = format!("{} 00:00", date);
     let end_time = format!("{} 23:59", date);
     let jql = format!(
@@ -45,6 +44,8 @@ pub fn fetch_tasks(config: &AppConfig, date: &str) -> Result<Vec<TaskInfo>, Stri
         end_time,
         jira.username
     );
+
+    log::info!("Jira: 开始获取任务, date={}, user={}", date, jira.username);
 
     let url = format!(
         "{}/rest/api/2/search?jql={}&fields=summary,status",
@@ -57,17 +58,24 @@ pub fn fetch_tasks(config: &AppConfig, date: &str) -> Result<Vec<TaskInfo>, Stri
         .bearer_auth(&jira.api_token)
         .header("Accept", "application/json")
         .send()
-        .map_err(|e| format!("Jira request failed: {}", e))?;
+        .map_err(|e| {
+            log::error!("Jira: 请求失败: {}", e);
+            format!("Jira request failed: {}", e)
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
+        log::error!("Jira: API 返回错误 {} - {}", status, body);
         return Err(format!("Jira API error: {} - {}", status, body));
     }
 
     let data: JiraSearchResponse = response
         .json()
-        .map_err(|e| format!("Failed to parse Jira response: {}", e))?;
+        .map_err(|e| {
+            log::error!("Jira: 解析响应失败: {}", e);
+            format!("Failed to parse Jira response: {}", e)
+        })?;
 
     let tasks: Vec<TaskInfo> = data
         .issues
@@ -80,6 +88,9 @@ pub fn fetch_tasks(config: &AppConfig, date: &str) -> Result<Vec<TaskInfo>, Stri
         })
         .collect();
 
-    log::info!("Fetched {} Jira tasks", tasks.len());
+    log::info!("Jira: 获取到 {} 条任务", tasks.len());
+    for t in &tasks {
+        log::info!("  - [{}] {}", t.key, t.summary);
+    }
     Ok(tasks)
 }

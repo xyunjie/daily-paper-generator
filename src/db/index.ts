@@ -18,24 +18,32 @@ export async function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       work_date TEXT NOT NULL,
       content TEXT NOT NULL,
+      source TEXT DEFAULT 'manual',
       created_at TEXT NOT NULL
     )`
   );
+  // 为已存在的表添加source字段（如果不存在）
+  try {
+    await db.execute(`ALTER TABLE work_items ADD COLUMN source TEXT DEFAULT 'manual'`);
+  } catch (e) {
+    // 字段已存在，忽略错误
+  }
 }
 
 export interface WorkItem {
   id: number;
   work_date: string;
   content: string;
+  source: 'jira' | 'gitlab' | 'manual';
   created_at: string;
 }
 
-export async function addWorkItem(workDate: string, content: string) {
+export async function addWorkItem(workDate: string, content: string, source: 'jira' | 'gitlab' | 'manual' = 'manual') {
   const db = await getDb();
   const createdAt = new Date().toISOString();
   await db.execute(
-    "INSERT INTO work_items (work_date, content, created_at) VALUES (?, ?, ?)",
-    [workDate, content, createdAt]
+    "INSERT INTO work_items (work_date, content, source, created_at) VALUES (?, ?, ?, ?)",
+    [workDate, content, source, createdAt]
   );
 }
 
@@ -48,14 +56,14 @@ export async function listWorkItems(startDate: string, endDate: string) {
   return rows;
 }
 
-export async function replaceWorkItems(workDate: string, contents: string[]) {
+export async function replaceWorkItems(workDate: string, items: Array<{ content: string; source?: 'jira' | 'gitlab' | 'manual' }>) {
   const db = await getDb();
   await db.execute("DELETE FROM work_items WHERE work_date = ?", [workDate]);
   const createdAt = new Date().toISOString();
-  for (const content of contents) {
+  for (const item of items) {
     await db.execute(
-      "INSERT INTO work_items (work_date, content, created_at) VALUES (?, ?, ?)",
-      [workDate, content, createdAt]
+      "INSERT INTO work_items (work_date, content, source, created_at) VALUES (?, ?, ?, ?)",
+      [workDate, item.content, item.source ?? 'manual', createdAt]
     );
   }
 }

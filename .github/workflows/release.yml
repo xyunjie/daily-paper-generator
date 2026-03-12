@@ -17,7 +17,7 @@ jobs:
           - platform: 'macos-latest'
             args: '--target universal-apple-darwin'
           - platform: 'ubuntu-22.04'
-            args: '--bundles appimage,deb'
+            args: '--bundles deb'
           - platform: 'windows-latest'
             args: ''
 
@@ -31,7 +31,17 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev javascriptcoregtk-4.1-dev
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            javascriptcoregtk-4.1-dev \
+            file \
+            libssl-dev \
+            pkg-config
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

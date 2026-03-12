@@ -1,25 +1,34 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref } from "vue";
 import { message } from "ant-design-vue";
 import dayjs, { type Dayjs } from "dayjs";
 import { initDb, listWorkItems, replaceWorkItems, type WorkItem } from "../db";
 import { buildWeekDates } from "../utils/date";
 import { invoke } from "@tauri-apps/api/core";
 
+interface FetchedItem {
+  content: string;
+  source: "jira" | "gitlab";
+}
+
 interface DailyCard {
   date: Date;
   dateStr: string;
   weekday: string;
   items: WorkItem[];
+  fetchLoading: boolean;
+  polishLoading: boolean;
 }
 
 const cards = ref<DailyCard[]>([]);
 const loading = ref(false);
-const addModalOpen = ref(false);
-const addDate = ref<Dayjs>(dayjs());
-const addContents = ref<string[]>([""]);
-const autoFetchLoading = ref(false);
 const exportLoading = ref(false);
+
+// 编辑弹窗
+const editModalOpen = ref(false);
+const editDate = ref<Dayjs>(dayjs());
+const editContents = ref<string[]>([""]);
+const editSaving = ref(false);
 
 onMounted(async () => {
   try {
@@ -40,76 +49,86 @@ async function loadWeek() {
     cards.value = week.map((d) => ({
       ...d,
       items: rows.filter((r) => r.work_date === d.dateStr),
+      fetchLoading: false,
+      polishLoading: false,
     }));
   } finally {
     loading.value = false;
   }
 }
 
-function getItemsByDate(dateStr: string) {
-  const card = cards.value.find((c) => c.dateStr === dateStr);
-  return card ? card.items : [];
+async function handleAutoFetch(card: DailyCard) {
+  card.fetchLoading = true;
+  try {
+    const result = await invoke<{ items: FetchedItem[] }>("fetch_daily_items", {
+      date: card.dateStr,
+    });
+    const items = result?.items || [];
+    await replaceWorkItems(card.dateStr, items.map((i) => ({ content: i.content, source: i.source })));
+    await loadWeek();
+    message.success(`已获取 ${items.length} 条记录`);
+  } catch (e) {
+    message.error(`自动获取失败: ${e}`);
+  } finally {
+    card.fetchLoading = false;
+  }
 }
 
-async function openAddModal() {
-  const dateStr = addDate.value.format("YYYY-MM-DD");
-  const existing = getItemsByDate(dateStr);
-  addContents.value = existing.length ? existing.map((i) => i.content) : [""];
-  addModalOpen.value = true;
-}
-
-watch(addDate, (newDate) => {
-  if (!newDate) return;
-  const dateStr = newDate.format("YYYY-MM-DD");
-  const existing = getItemsByDate(dateStr);
-  addContents.value = existing.length ? existing.map((i) => i.content) : [""];
-});
-
-function addContentRow() {
-  addContents.value.push("");
-}
-
-function removeContentRow(index: number) {
-  if (addContents.value.length === 1) {
-    addContents.value[0] = "";
+async function handlePolish(card: DailyCard) {
+  if (card.items.length === 0) {
+    message.warning("请先自动获取数据");
     return;
   }
-  addContents.value.splice(index, 1);
+  card.polishLoading = true;
+  try {
+    const rawItems = card.items.map((i) => ({ content: i.content, source: i.source || "manual" }));
+    const polished = await invoke<string[]>("polish_daily_items", {
+      date: card.dateStr,
+      itemsJson: JSON.stringify(rawItems),
+    });
+    await replaceWorkItems(card.dateStr, polished.map((c) => ({ content: c, source: "manual" as const })));
+    await loadWeek();
+    message.success("AI润色完成");
+  } catch (e) {
+    message.error(`AI润色失败: ${e}`);
+  } finally {
+    card.polishLoading = false;
+  }
 }
 
-async function handleAdd() {
-  const dateStr = addDate.value.format("YYYY-MM-DD");
-  const rows = addContents.value.map((v) => v.trim()).filter(Boolean);
+function openEditModal(card: DailyCard) {
+  editDate.value = dayjs(card.dateStr);
+  editContents.value = card.items.length ? card.items.map((i) => i.content) : [""];
+  editModalOpen.value = true;
+}
+
+function addEditRow() {
+  editContents.value.push("");
+}
+
+function removeEditRow(index: number) {
+  if (editContents.value.length === 1) {
+    editContents.value[0] = "";
+    return;
+  }
+  editContents.value.splice(index, 1);
+}
+
+async function handleEditSave() {
+  const dateStr = editDate.value.format("YYYY-MM-DD");
+  const rows = editContents.value.map((v) => v.trim()).filter(Boolean);
   if (rows.length === 0) {
     message.warning("请至少填写一条工作内容");
     return;
   }
-  await replaceWorkItems(dateStr, rows);
-  addContents.value = [""];
-  addModalOpen.value = false;
-  await loadWeek();
-  message.success("已保存");
-}
-
-async function handleAutoFetch() {
-  const dateStr = addDate.value.format("YYYY-MM-DD");
-  autoFetchLoading.value = true;
+  editSaving.value = true;
   try {
-    const result = await invoke<{ tasks: string[]; commits: string[] }>("fetch_daily_items", {
-      date: dateStr,
-    });
-    const items = [...(result?.tasks || []), ...(result?.commits || [])];
-    // 清空之前的记录，写入新获取的内容
-    const rows = items.filter((item) => item.trim());
-    await replaceWorkItems(dateStr, rows);
-    addContents.value = rows.length ? rows : [""];
-    addModalOpen.value = false;
+    await replaceWorkItems(dateStr, rows.map((c) => ({ content: c, source: "manual" as const })));
+    editModalOpen.value = false;
     await loadWeek();
-    message.success("已自动获取并写入");
-  } catch (e) {
-    message.error(`自动获取失败: ${e}`);
+    message.success("已保存");
   } finally {
-    autoFetchLoading.value = false;
+    editSaving.value = false;
   }
 }
 
@@ -119,19 +138,16 @@ async function exportWeek() {
     const week = buildWeekDates(new Date());
     const startDate = week[0].dateStr;
     const endDate = week[6].dateStr;
-
     const dayItems = cards.value.map((card) => ({
       date: card.dateStr,
       contents: card.items.map((item) => item.content),
     }));
-
     await invoke("export_week_report", {
       startDate,
       endDate,
       itemsJson: JSON.stringify(dayItems),
       employee: "",
     });
-
     message.success("周报已保存");
   } catch (e) {
     const msg = String(e);
@@ -141,6 +157,18 @@ async function exportWeek() {
     exportLoading.value = false;
   }
 }
+
+function sourceLabel(source: string) {
+  if (source === "jira") return "Jira";
+  if (source === "gitlab") return "GitLab";
+  return null;
+}
+
+function sourceColor(source: string) {
+  if (source === "jira") return "blue";
+  if (source === "gitlab") return "orange";
+  return "";
+}
 </script>
 
 <template>
@@ -148,7 +176,6 @@ async function exportWeek() {
     <div class="toolbar">
       <div class="title">本周工作内容</div>
       <div class="actions">
-        <a-button type="primary" @click="openAddModal">添加工作内容</a-button>
         <a-button :loading="exportLoading" @click="exportWeek">导出本周工作内容</a-button>
       </div>
     </div>
@@ -162,43 +189,67 @@ async function exportWeek() {
       >
         <div v-if="card.items.length === 0" class="empty-text">暂无记录</div>
         <ul v-else class="work-list">
-          <li v-for="item in card.items" :key="item.id">{{ item.content }}</li>
+          <li v-for="item in card.items" :key="item.id" class="work-item">
+            <a-tag v-if="sourceLabel(item.source)" :color="sourceColor(item.source)" class="source-tag">
+              {{ sourceLabel(item.source) }}
+            </a-tag>
+            <span>{{ item.content }}</span>
+          </li>
         </ul>
+        <template #actions>
+          <a-button
+            type="text"
+            size="small"
+            :loading="card.fetchLoading"
+            :disabled="card.fetchLoading || card.polishLoading"
+            @click="handleAutoFetch(card)"
+          >
+            自动获取
+          </a-button>
+          <a-button
+            type="text"
+            size="small"
+            :loading="card.polishLoading"
+            :disabled="card.fetchLoading || card.polishLoading"
+            @click="handlePolish(card)"
+          >
+            AI润色
+          </a-button>
+          <a-button
+            type="text"
+            size="small"
+            :disabled="card.fetchLoading || card.polishLoading"
+            @click="openEditModal(card)"
+          >
+            编辑
+          </a-button>
+        </template>
       </a-card>
     </div>
 
     <a-spin v-else />
 
     <a-modal
-      v-model:open="addModalOpen"
-      title="添加工作内容"
+      v-model:open="editModalOpen"
+      title="编辑工作内容"
       ok-text="保存"
-      @ok="handleAdd"
+      :confirm-loading="editSaving"
+      @ok="handleEditSave"
     >
       <a-form layout="vertical">
         <a-form-item label="日期">
-          <a-date-picker v-model:value="addDate" format="YYYY-MM-DD" />
+          <a-date-picker v-model:value="editDate" format="YYYY-MM-DD" disabled />
         </a-form-item>
         <a-form-item label="工作内容">
           <div class="dynamic-list">
-            <div v-for="(_row, index) in addContents" :key="index" class="dynamic-row">
-              <a-input
-                v-model:value="addContents[index]"
-                placeholder="输入一条工作内容"
-              />
-              <a-button type="text" danger @click="removeContentRow(index)">
-                删除
-              </a-button>
+            <div v-for="(_row, index) in editContents" :key="index" class="dynamic-row">
+              <a-input v-model:value="editContents[index]" placeholder="输入一条工作内容" />
+              <a-button type="text" danger @click="removeEditRow(index)">删除</a-button>
             </div>
-            <a-button type="dashed" block @click="addContentRow">+ 添加一行</a-button>
+            <a-button type="dashed" block @click="addEditRow">+ 添加一行</a-button>
           </div>
         </a-form-item>
       </a-form>
-      <template #footer>
-        <a-button @click="addModalOpen = false">取消</a-button>
-        <a-button :loading="autoFetchLoading" :disabled="autoFetchLoading" @click="handleAutoFetch">自动获取</a-button>
-        <a-button type="primary" :loading="autoFetchLoading" :disabled="autoFetchLoading" @click="handleAdd">保存</a-button>
-      </template>
     </a-modal>
   </div>
 </template>
@@ -233,6 +284,18 @@ async function exportWeek() {
 
 .day-card {
   min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.day-card :deep(.ant-card-body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.day-card :deep(.ant-card-actions) {
+  margin-top: 0;
 }
 
 .dynamic-list {
@@ -248,12 +311,26 @@ async function exportWeek() {
 }
 
 .work-list {
-  padding-left: 18px;
+  padding-left: 0;
   margin: 0;
+  list-style: none;
+}
+
+.work-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.source-tag {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .empty-text {
   color: #999;
 }
-
 </style>
+

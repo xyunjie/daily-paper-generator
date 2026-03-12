@@ -2,9 +2,14 @@ use crate::config::AppConfig;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+pub struct WorkItemWithSource {
+    pub content: String,
+    pub source: String, // "jira" or "gitlab"
+}
+
+#[derive(Debug, Serialize)]
 pub struct FetchedItems {
-    pub tasks: Vec<String>,
-    pub commits: Vec<String>,
+    pub items: Vec<WorkItemWithSource>,
 }
 
 // const DAILY_BULLET_MIN: usize = 3;
@@ -293,57 +298,92 @@ fn build_llm_input(date: &str, tasks: &[(String, String)], commits: &[String]) -
 }
 
 pub fn fetch_daily_items(config: &AppConfig, date: &str) -> Result<FetchedItems, String> {
-    let jira_tasks = crate::jira::fetch_tasks(config, date)?;
-    let tasks_struct = jira_tasks
-        .into_iter()
-        .map(|t| (t.key, t.summary))
-        .collect::<Vec<_>>();
+    log::info!("开始自动获取: date={}", date);
 
+    let jira_tasks = crate::jira::fetch_tasks(config, date)?;
     let gitlab_commits = crate::gitlab::fetch_commits(config, date)?;
-    let commits_titles = gitlab_commits
-        .into_iter()
-        .map(|c| normalize_commit_title(&c.title))
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>();
+
+    let mut items: Vec<WorkItemWithSource> = Vec::new();
+
+    for task in &jira_tasks {
+        let content = sanitize_task_summary(&task.summary);
+        if !content.is_empty() {
+            items.push(WorkItemWithSource {
+                content,
+                source: "jira".to_string(),
+            });
+        }
+    }
+
+    for commit in &gitlab_commits {
+        let content = normalize_commit_title(&commit.title);
+        if !content.is_empty() {
+            items.push(WorkItemWithSource {
+                content,
+                source: "gitlab".to_string(),
+            });
+        }
+    }
+
+    log::info!("自动获取完成: jira={} 条, gitlab={} 条, 合计={} 条", jira_tasks.len(), gitlab_commits.len(), items.len());
+    Ok(FetchedItems { items })
+}
+
+pub fn polish_daily_items(config: &AppConfig, date: &str, raw_items: &[WorkItemWithSource]) -> Result<Vec<String>, String> {
+    log::info!("AI润色: date={}, 输入 {} 条", date, raw_items.len());
+
+    let tasks_struct: Vec<(String, String)> = raw_items
+        .iter()
+        .filter(|i| i.source == "jira")
+        .map(|i| (String::new(), i.content.clone()))
+        .collect();
+
+    let commits_titles: Vec<String> = raw_items
+        .iter()
+        .filter(|i| i.source == "gitlab")
+        .map(|i| i.content.clone())
+        .collect();
+
+    log::info!("AI润色: jira={} 条, gitlab={} 条", tasks_struct.len(), commits_titles.len());
 
     let has_model = !config.model.base_url.trim().is_empty()
         && !config.model.api_key.trim().is_empty()
         && !config.model.model.trim().is_empty();
 
-    let lines = if has_model {
-        let input = build_llm_input(date, &tasks_struct, &commits_titles);
-        match crate::llm::polish_with_openai(
-            &config.model.base_url,
-            &config.model.api_key,
-            &config.model.model,
-            &input,
-        ) {
-            Ok(lines) => {
-                let cleaned = crate::llm::postprocess_daily_bullets(lines);
-                if cleaned.is_empty() {
-                    summarize_locally(date, &tasks_struct, &commits_titles)
-                } else {
-                    cleaned
-                }
-            }
-            Err(e) => {
-                log::warn!("LLM polish failed, fallback to local summarizer: {}", e);
+    if !has_model {
+        log::warn!("AI润色: 未配置模型信息，无法润色");
+        return Err("请先配置模型信息（base_url / api_key / model）".to_string());
+    }
+
+    log::info!("AI润色: 调用模型 {}", config.model.model);
+    let input = build_llm_input(date, &tasks_struct, &commits_titles);
+    let lines = match crate::llm::polish_with_openai(
+        &config.model.base_url,
+        &config.model.api_key,
+        &config.model.model,
+        &input,
+    ) {
+        Ok(lines) => {
+            let cleaned = crate::llm::postprocess_daily_bullets(lines);
+            if cleaned.is_empty() {
+                log::warn!("AI润色: 模型返回为空，回退到本地规则");
                 summarize_locally(date, &tasks_struct, &commits_titles)
+            } else {
+                log::info!("AI润色: 模型返回 {} 条", cleaned.len());
+                cleaned
             }
         }
-    } else {
-        summarize_locally(date, &tasks_struct, &commits_titles)
+        Err(e) => {
+            log::warn!("AI润色: 模型调用失败，回退到本地规则: {}", e);
+            summarize_locally(date, &tasks_struct, &commits_titles)
+        }
     };
 
     let mut final_lines = postprocess_bullets(lines);
-
-    // Clamp to 3-8, but do not hallucinate: if less than min, keep as-is.
     if final_lines.len() > DAILY_BULLET_MAX {
         final_lines.truncate(DAILY_BULLET_MAX);
     }
 
-    Ok(FetchedItems {
-        tasks: final_lines,
-        commits: vec![],
-    })
+    log::info!("AI润色完成: 输出 {} 条", final_lines.len());
+    Ok(final_lines)
 }
