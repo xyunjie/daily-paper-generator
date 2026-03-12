@@ -1,4 +1,4 @@
-# Daily Paper Generator
+# 日报工具 (Daily Paper Tool)
 
 一个基于 Tauri + Vue 3 的跨平台桌面应用，用于自动生成工作日报和周报。通过集成 Jira 和 GitLab，自动获取工作任务和代码提交记录，并借助 AI 模型生成规范化的工作内容描述。
 
@@ -21,7 +21,7 @@
 
 ### 从 Release 下载
 
-前往 [Releases](https://github.com/accepted./daily-paper-generator/releases) 页面下载对应平台的安装包：
+前往 [Releases](https://github.com/accepted./daily-paper-tool/releases) 页面下载对应平台的安装包：
 
 - **macOS**: `.dmg` 文件
 - **Windows**: `.msi` 或 NSIS 安装程序
@@ -40,8 +40,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/accepted./daily-paper-generator.git
-cd daily-paper-generator
+git clone https://github.com/accepted./daily-paper-tool.git
+cd daily-paper-tool
 
 # 安装依赖
 pnpm install
@@ -129,7 +129,7 @@ pnpm tauri build
 ## 项目结构
 
 ```
-daily-paper-generator/
+daily-paper-tool/
 ├── src/                    # Vue 前端源码
 │   ├── pages/              # 页面组件
 │   │   ├── Home.vue        # 本周工作

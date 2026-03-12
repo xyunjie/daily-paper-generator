@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "usersacceptedpublicgithubdaily-paper-generator",
+  "productName": "daily-paper-tool",
   "version": "0.1.0",
-  "identifier": "com.dailypaper.generator",
+  "identifier": "com.dailypaper.tool",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "usersacceptedpublicgithubdaily-paper-generator",
+        "title": "日报工具",
         "width": 1400,
         "height": 800,
         "center": true

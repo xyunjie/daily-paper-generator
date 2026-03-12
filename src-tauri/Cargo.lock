@@ -755,6 +755,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "daily-paper-tool"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs-next",
+ "docx-rs",
+ "log",
+ "once_cell",
+ "reqwest 0.12.28",
+ "rfd",
+ "rust_xlsxwriter",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tauri-plugin-sql",
+ "urlencoding",
+]
+
+[[package]]
 name = "darling"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5489,28 +5511,6 @@ dependencies = [
  "serde",
  "unic-ucd-ident",
  "url",
-]
-
-[[package]]
-name = "usersacceptedpublicgithubdaily-paper-generator"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs-next",
- "docx-rs",
- "log",
- "once_cell",
- "reqwest 0.12.28",
- "rfd",
- "rust_xlsxwriter",
- "serde",
- "serde_json",
- "simplelog",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tauri-plugin-sql",
- "urlencoding",
 ]
 
 [[package]]
