@@ -104,13 +104,12 @@ fn generate_report(date: String) -> Result<String, String> {
     Ok(file_path)
 }
 
-/// 导出本周工作内容为 docx 周报
-/// items_json: JSON array of { date: string, contents: string[] }
 #[tauri::command]
 fn export_week_report(
     start_date: String,
     end_date: String,
     items_json: String,
+    summary: String,
     _employee: String,
 ) -> Result<String, String> {
     #[derive(serde::Deserialize)]
@@ -127,7 +126,7 @@ fn export_week_report(
         .map(|d| WeeklyWorkItem { date: d.date, contents: d.contents })
         .collect();
 
-    report::generate_week_xlsx(&start_date, &end_date, &weekly_items)?;
+    report::generate_week_xlsx(&start_date, &end_date, &weekly_items, &summary)?;
 
     let file_name = format!("周报_{}_{}.xlsx", start_date, end_date);
     let src_path = crate::config::CONFIG_DIR
@@ -179,6 +178,44 @@ fn export_week_report(
 }
 
 #[tauri::command]
+async fn summarize_week(items_json: String) -> Result<String, String> {
+    let config = config::load_config()?;
+
+    if config.model.base_url.trim().is_empty()
+        || config.model.api_key.trim().is_empty()
+        || config.model.model.trim().is_empty()
+    {
+        return Err("请先配置模型信息（base_url / api_key / model）".to_string());
+    }
+
+    let items: Vec<String> = serde_json::from_str(&items_json)
+        .map_err(|e| format!("解析数据失败: {}", e))?;
+
+    if items.is_empty() {
+        return Err("本周暂无工作内容".to_string());
+    }
+
+    log::info!("周总结: 共 {} 条工作内容，调用模型 {}", items.len(), config.model.model);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = llm::summarize_week_with_openai(
+            &config.model.base_url,
+            &config.model.api_key,
+            &config.model.model,
+            &items,
+            &config.prompts.summary_system,
+        );
+        match &result {
+            Ok(s) => log::info!("周总结完成，字数: {}", s.chars().count()),
+            Err(e) => log::error!("周总结失败: {}", e),
+        }
+        result
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+#[tauri::command]
 fn get_log_path() -> Result<String, String> {
     let log_dir = config::CONFIG_DIR.lock().unwrap().clone();
     let log_path = log_dir.join("daily-paper-generator.log");
@@ -226,6 +263,7 @@ pub fn run() {
             load_config,
             fetch_daily_items,
             polish_daily_items,
+            summarize_week,
             generate_report,
             export_week_report,
             get_log_path,

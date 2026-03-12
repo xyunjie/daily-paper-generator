@@ -26,6 +26,11 @@ interface AppConfig {
     api_key: string;
     model: string;
   };
+  prompts: {
+    polish_system: string;
+    polish_few_shot: string;
+    summary_system: string;
+  };
 }
 
 const config = ref<AppConfig>({
@@ -33,6 +38,7 @@ const config = ref<AppConfig>({
   gitlab: { base_url: "", private_token: "", username: "", user_id: "" },
   user_email: "",
   model: { base_url: "", api_key: "", model: "" },
+  prompts: { polish_system: "", polish_few_shot: "", summary_system: "" },
 });
 const loading = ref(false);
 
@@ -40,7 +46,12 @@ onMounted(async () => {
   loading.value = true;
   try {
     const result = await invoke<AppConfig>("load_config");
-    config.value = result || config.value;
+    if (result) {
+      config.value = {
+        ...result,
+        prompts: result.prompts || { polish_system: "", polish_few_shot: "", summary_system: "" },
+      };
+    }
   } catch (e) {
     message.error(`加载配置失败: ${e}`);
   } finally {
@@ -123,6 +134,44 @@ async function saveConfig() {
           </a-form-item>
         </a-form>
       </a-card>
+
+      <a-card title="提示词配置" class="config-card prompts-card">
+        <a-form layout="vertical" :model="config">
+          <a-form-item>
+            <template #label>
+              <span>AI润色 System Prompt</span>
+              <span class="prompt-hint">留空则使用默认提示词</span>
+            </template>
+            <a-textarea
+              v-model:value="config.prompts.polish_system"
+              :rows="6"
+              placeholder="留空使用默认：你是日报助手。请将输入信息整合为可直接填日报的中文要点..."
+            />
+          </a-form-item>
+          <a-form-item>
+            <template #label>
+              <span>AI润色 Few-shot 示例</span>
+              <span class="prompt-hint">留空则使用默认示例</span>
+            </template>
+            <a-textarea
+              v-model:value="config.prompts.polish_few_shot"
+              :rows="8"
+              placeholder="留空使用默认示例（包含输入/输出示范）"
+            />
+          </a-form-item>
+          <a-form-item>
+            <template #label>
+              <span>周总结 System Prompt</span>
+              <span class="prompt-hint">留空则使用默认提示词</span>
+            </template>
+            <a-textarea
+              v-model:value="config.prompts.summary_system"
+              :rows="6"
+              placeholder="留空使用默认：你是工作总结助手。请将本周的工作内容整合为一段精炼的周总结..."
+            />
+          </a-form-item>
+        </a-form>
+      </a-card>
     </div>
 
     <div class="save-actions">
@@ -150,6 +199,17 @@ async function saveConfig() {
 
 .config-form {
   max-width: 520px;
+}
+
+.prompts-card {
+  grid-column: 1 / -1;
+}
+
+.prompt-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #999;
+  font-weight: normal;
 }
 
 .save-actions {

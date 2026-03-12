@@ -28,6 +28,15 @@ export async function initDb() {
   } catch (e) {
     // 字段已存在，忽略错误
   }
+  // 周总结表
+  await db.execute(
+    `CREATE TABLE IF NOT EXISTS week_summaries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      week_start TEXT NOT NULL UNIQUE,
+      summary TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`
+  );
 }
 
 export interface WorkItem {
@@ -165,4 +174,29 @@ export async function countWorkDays(keyword?: string, startDate?: string, endDat
 export async function deleteWorkItem(id: number) {
   const db = await getDb();
   await db.execute("DELETE FROM work_items WHERE id = ?", [id]);
+}
+
+export interface WeekSummary {
+  id: number;
+  week_start: string;
+  summary: string;
+  updated_at: string;
+}
+
+export async function saveWeekSummary(weekStart: string, summary: string) {
+  const db = await getDb();
+  const updatedAt = new Date().toISOString();
+  await db.execute(
+    "INSERT OR REPLACE INTO week_summaries (week_start, summary, updated_at) VALUES (?, ?, ?)",
+    [weekStart, summary, updatedAt]
+  );
+}
+
+export async function getWeekSummary(weekStart: string) {
+  const db = await getDb();
+  const rows = await db.select<WeekSummary[]>(
+    "SELECT * FROM week_summaries WHERE week_start = ?",
+    [weekStart]
+  );
+  return rows[0] || null;
 }

@@ -362,6 +362,8 @@ pub fn polish_daily_items(config: &AppConfig, date: &str, raw_items: &[WorkItemW
         &config.model.api_key,
         &config.model.model,
         &input,
+        &config.prompts.polish_system,
+        &config.prompts.polish_few_shot,
     ) {
         Ok(lines) => {
             let cleaned = crate::llm::postprocess_daily_bullets(lines);

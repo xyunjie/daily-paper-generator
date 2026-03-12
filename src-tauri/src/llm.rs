@@ -124,47 +124,76 @@ pub fn postprocess_daily_bullets(lines: Vec<String>) -> Vec<String> {
     out
 }
 
+pub fn summarize_week_with_openai(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    week_items: &[String],
+    system_prompt: &str,
+) -> Result<String, String> {
+    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+    let client = Client::new();
+
+    let items_text = week_items.join("\n- ");
+    let prompt = format!(
+        "【本周工作内容】\n- {}\n\n请生成本周工作总结（不超过200字）：",
+        items_text
+    );
+
+    let req = ChatRequest {
+        model: model.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: prompt,
+            },
+        ],
+        temperature: 0.3,
+    };
+
+    let res = client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&req)
+        .send()
+        .map_err(|e| format!("模型请求失败: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("模型接口错误: {}", res.status()));
+    }
+
+    let data: ChatResponse = res
+        .json()
+        .map_err(|e| format!("模型响应解析失败: {}", e))?;
+
+    let content = data
+        .choices
+        .get(0)
+        .map(|c| c.message.content.clone())
+        .unwrap_or_default();
+
+    Ok(content.trim().to_string())
+}
+
 pub fn polish_with_openai(
     base_url: &str,
     api_key: &str,
     model: &str,
     input: &str,
+    system_prompt: &str,
+    few_shot_prompt: &str,
 ) -> Result<Vec<String>, String> {
     let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
     let client = Client::new();
 
-    let system = format!(
-        "你是日报助手。请将输入信息整合为可直接填日报的中文要点。\n\
-硬性规则：\n\
-1) 只输出要点列表，每条一行，不要标题/解释/前后缀。\n\
-2) 输出条数为 {}-{} 条（信息确实很少时可少于 {} 条，但不要胡编）。\n\
-3) 每条必须是纯中文要点，尽量以动词开头（如：优化/修复/测试/联调/完善/修改/添加）。\n\
-4) 严禁在输出中出现 Jira Key（如 ABC-123）、GitLab 项目名/路径（如 group/repo）、提交 hash/short_id、URL。\n\
-5) 优先合并同一主题/同一任务的多条提交，避免碎片化。",
-        DAILY_BULLET_MIN,
-        DAILY_BULLET_MAX,
-        DAILY_BULLET_MIN
-    );
-
-    let few_shot = "【示例输入】\n\
-【日期】2026-03-06\n\
-【Jira Done 任务】\n\
-key=ABC-101 | summary=导出 CSV 表头字段调整\n\
-key=ABC-102 | summary=累计流量统计修复\n\
-【GitLab 提交摘要】\n\
-- feat: export csv header mapping\n\
-- fix: traffic total calc\n\
-- refactor: analytics api\n\
-\n\
-【示例输出】\n\
-修改导出 CSV 表头字段\n\
-修复累计流量统计问题\n\
-优化分析与数据接口";
-
     let prompt = format!(
         "{}\n\n{}\n\n【开始处理】\n{}",
         "请严格按规则输出。",
-        few_shot,
+        few_shot_prompt,
         input
     );
 
@@ -173,7 +202,7 @@ key=ABC-102 | summary=累计流量统计修复\n\
         messages: vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: system,
+                content: system_prompt.to_string(),
             },
             ChatMessage {
                 role: "user".to_string(),

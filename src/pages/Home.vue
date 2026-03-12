@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, computed } from "vue";
 import { message } from "ant-design-vue";
 import dayjs, { type Dayjs } from "dayjs";
-import { initDb, listWorkItems, replaceWorkItems, type WorkItem } from "../db";
+import isoWeek from "dayjs/plugin/isoWeek";
+import { initDb, listWorkItems, replaceWorkItems, saveWeekSummary, getWeekSummary, type WorkItem } from "../db";
 import { buildWeekDates } from "../utils/date";
 import { invoke } from "@tauri-apps/api/core";
+
+dayjs.extend(isoWeek);
 
 interface FetchedItem {
   content: string;
@@ -24,6 +27,46 @@ const cards = ref<DailyCard[]>([]);
 const loading = ref(false);
 const exportLoading = ref(false);
 
+// 当前选中周的周一（用于驱动数据加载）
+const selectedWeekStart = ref<Dayjs>(dayjs().isoWeekday(1).startOf("day"));
+
+// 今天所在周的周一，用于禁用未来周
+const thisWeekStart = dayjs().isoWeekday(1).startOf("day");
+
+const weekLabel = computed(() => {
+  const start = selectedWeekStart.value;
+  const end = start.add(6, "day");
+  const isThisWeek = start.isSame(thisWeekStart, "day");
+  return isThisWeek
+    ? `本周（${start.format("MM/DD")} - ${end.format("MM/DD")}）`
+    : `${start.format("YYYY/MM/DD")} - ${end.format("MM/DD")}`;
+});
+
+function disabledWeek(date: Dayjs) {
+  // 禁用未来的周（周一 > 今天所在周的周一）
+  return date.isoWeekday(1).startOf("day").isAfter(thisWeekStart);
+}
+
+function onWeekChange(date: Dayjs | null) {
+  if (!date) return;
+  selectedWeekStart.value = date.isoWeekday(1).startOf("day");
+  loadWeek();
+}
+
+function prevWeek() {
+  selectedWeekStart.value = selectedWeekStart.value.subtract(1, "week");
+  loadWeek();
+}
+
+function nextWeek() {
+  const next = selectedWeekStart.value.add(1, "week");
+  if (next.isAfter(thisWeekStart)) return;
+  selectedWeekStart.value = next;
+  loadWeek();
+}
+
+const isCurrentWeek = computed(() => selectedWeekStart.value.isSame(thisWeekStart, "day"));
+
 // 编辑弹窗
 const editModalOpen = ref(false);
 const editDate = ref<Dayjs>(dayjs());
@@ -42,7 +85,8 @@ onMounted(async () => {
 async function loadWeek() {
   loading.value = true;
   try {
-    const week = buildWeekDates(new Date());
+    const base = selectedWeekStart.value.toDate();
+    const week = buildWeekDates(base);
     const start = week[0].dateStr;
     const end = week[6].dateStr;
     const rows = await listWorkItems(start, end);
@@ -52,6 +96,10 @@ async function loadWeek() {
       fetchLoading: false,
       polishLoading: false,
     }));
+    // 加载周总结
+    const weekStartStr = selectedWeekStart.value.format("YYYY-MM-DD");
+    const summaryRecord = await getWeekSummary(weekStartStr);
+    weekSummary.value = summaryRecord?.summary || "";
   } finally {
     loading.value = false;
   }
@@ -135,7 +183,8 @@ async function handleEditSave() {
 async function exportWeek() {
   exportLoading.value = true;
   try {
-    const week = buildWeekDates(new Date());
+    const base = selectedWeekStart.value.toDate();
+    const week = buildWeekDates(base);
     const startDate = week[0].dateStr;
     const endDate = week[6].dateStr;
     const dayItems = cards.value.map((card) => ({
@@ -146,6 +195,7 @@ async function exportWeek() {
       startDate,
       endDate,
       itemsJson: JSON.stringify(dayItems),
+      summary: weekSummary.value,
       employee: "",
     });
     message.success("周报已保存");
@@ -169,12 +219,53 @@ function sourceColor(source: string) {
   if (source === "gitlab") return "orange";
   return "";
 }
+
+// 周总结
+const weekSummary = ref("");
+const summaryLoading = ref(false);
+
+async function handleSummarizeWeek() {
+  const allItems = cards.value.flatMap((c) => c.items.map((i) => i.content)).filter(Boolean);
+  if (allItems.length === 0) {
+    message.warning("本周暂无工作内容");
+    return;
+  }
+  summaryLoading.value = true;
+  weekSummary.value = "";
+  try {
+    const summary = await invoke<string>("summarize_week", {
+      itemsJson: JSON.stringify(allItems),
+    });
+    weekSummary.value = summary;
+    // 保存到数据库
+    const weekStartStr = selectedWeekStart.value.format("YYYY-MM-DD");
+    await saveWeekSummary(weekStartStr, summary);
+    message.success("总结已生成并保存");
+  } catch (e) {
+    message.error(`总结失败: ${e}`);
+  } finally {
+    summaryLoading.value = false;
+  }
+}
 </script>
 
 <template>
   <div class="home-container">
     <div class="toolbar">
-      <div class="title">本周工作内容</div>
+      <div class="week-nav">
+        <a-button size="small" @click="prevWeek">&lt;</a-button>
+        <a-date-picker
+          picker="week"
+          :value="selectedWeekStart"
+          :disabled-date="disabledWeek"
+          format="YYYY第WW周"
+          :allow-clear="false"
+          size="small"
+          @change="onWeekChange"
+        />
+        <a-button size="small" :disabled="isCurrentWeek" @click="nextWeek">&gt;</a-button>
+        <span class="week-label">{{ weekLabel }}</span>
+      </div>
       <div class="actions">
         <a-button :loading="exportLoading" @click="exportWeek">导出本周工作内容</a-button>
       </div>
@@ -229,6 +320,18 @@ function sourceColor(source: string) {
 
     <a-spin v-else />
 
+    <div class="week-summary-section">
+      <div class="summary-header">
+        <span class="summary-title">本周工作总结</span>
+        <a-button type="primary" :loading="summaryLoading" @click="handleSummarizeWeek">
+          开始总结
+        </a-button>
+      </div>
+      <a-spin v-if="summaryLoading" class="summary-spin" />
+      <div v-else-if="weekSummary" class="summary-content">{{ weekSummary }}</div>
+      <div v-else class="summary-placeholder">点击「开始总结」，AI 将提炼本周工作内容（不超过200字）</div>
+    </div>
+
     <a-modal
       v-model:open="editModalOpen"
       title="编辑工作内容"
@@ -266,9 +369,15 @@ function sourceColor(source: string) {
   margin-bottom: 16px;
 }
 
-.title {
-  font-size: 18px;
-  font-weight: 600;
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.week-label {
+  font-size: 14px;
+  color: #666;
 }
 
 .actions {
@@ -331,6 +440,45 @@ function sourceColor(source: string) {
 
 .empty-text {
   color: #999;
+}
+
+.week-summary-section {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+}
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.summary-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.summary-spin {
+  display: block;
+  text-align: center;
+  padding: 16px 0;
+}
+
+.summary-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #333;
+  white-space: pre-wrap;
+}
+
+.summary-placeholder {
+  font-size: 13px;
+  color: #bbb;
 }
 </style>
 

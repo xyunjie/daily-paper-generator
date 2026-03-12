@@ -121,6 +121,7 @@ pub fn generate_week_xlsx(
     start_date: &str,
     end_date: &str,
     items: &[WeeklyWorkItem],
+    summary: &str,
 ) -> Result<String, String> {
     ensure_config_dir()?;
 
@@ -195,6 +196,31 @@ pub fn generate_week_xlsx(
         }
 
         current_row += row_count as u32;
+    }
+
+    // 写入周总结
+    if !summary.is_empty() {
+        let summary_label_format = Format::new()
+            .set_bold()
+            .set_align(FormatAlign::Center)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_border(FormatBorder::Thin);
+
+        let summary_content_format = Format::new()
+            .set_align(FormatAlign::Left)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_text_wrap()
+            .set_border(FormatBorder::Thin);
+
+        worksheet
+            .write_string_with_format(current_row, 0, "本周总结", &summary_label_format)
+            .map_err(|e| format!("写入总结标签失败: {}", e))?;
+        worksheet
+            .write_string_with_format(current_row, 1, summary, &summary_content_format)
+            .map_err(|e| format!("写入总结内容失败: {}", e))?;
+        // 根据内容长度估算行高
+        let line_count = summary.chars().filter(|&c| c == '\n').count() + 1;
+        worksheet.set_row_height(current_row, (line_count as f64 * 15.0).max(40.0)).ok();
     }
 
     workbook
