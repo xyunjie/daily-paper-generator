@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "日报工具",
+  "productName": "DailyPaperTool",
   "version": "1.0.0",
   "identifier": "com.dailypaper.tool",
   "build": {
@@ -37,6 +37,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }
