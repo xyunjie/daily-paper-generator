@@ -1,5 +1,6 @@
 mod config;
 mod fetch;
+mod gitea;
 mod gitlab;
 mod jira;
 mod llm;
@@ -25,14 +26,12 @@ fn load_config() -> Result<AppConfig, String> {
 async fn fetch_daily_items(date: String) -> Result<fetch::FetchedItems, String> {
     let config = config::load_config()?;
 
-    if config.jira.base_url.is_empty() {
-        return Err("请先配置 Jira 信息".to_string());
-    }
-    if config.gitlab.base_url.is_empty() {
-        return Err("请先配置 GitLab 信息".to_string());
-    }
-    if config.user_email.is_empty() {
-        return Err("请先配置用户邮箱".to_string());
+    let has_jira = !config.jira.base_url.is_empty();
+    let has_gitlab = !config.gitlab.base_url.is_empty();
+    let has_gitea = !config.gitea.base_url.is_empty();
+
+    if !has_jira && !has_gitlab && !has_gitea {
+        return Err("请至少配置一个数据源（Jira / GitLab / Gitea）".to_string());
     }
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -73,25 +72,29 @@ fn generate_report(date: String) -> Result<String, String> {
 
     let config = config::load_config()?;
 
-    if config.jira.base_url.is_empty() {
-        return Err("请先配置 Jira 信息".to_string());
-    }
+    let has_jira = !config.jira.base_url.is_empty();
+    let has_gitlab = !config.gitlab.base_url.is_empty();
+    let has_gitea = !config.gitea.base_url.is_empty();
 
-    if config.gitlab.base_url.is_empty() {
-        return Err("请先配置 GitLab 信息".to_string());
-    }
-
-    if config.user_email.is_empty() {
-        return Err("请先配置用户邮箱".to_string());
+    if !has_jira && !has_gitlab && !has_gitea {
+        return Err("请至少配置一个数据源（Jira / GitLab / Gitea）".to_string());
     }
 
     // 获取 Jira 任务
     log::info!("Fetching Jira tasks...");
-    let tasks = jira::fetch_tasks(&config, &date)?;
+    let tasks = if has_jira {
+        jira::fetch_tasks(&config, &date)?
+    } else {
+        Vec::new()
+    };
 
     // 获取 GitLab 提交
     log::info!("Fetching GitLab commits...");
-    let commits = gitlab::fetch_commits(&config, &date)?;
+    let commits = if has_gitlab {
+        gitlab::fetch_commits(&config, &date)?
+    } else {
+        Vec::new()
+    };
 
     // 生成日报
     let report = DailyReport {
@@ -110,6 +113,8 @@ fn export_week_report(
     end_date: String,
     items_json: String,
     summary: String,
+    key_tasks: String,
+    completion_status: String,
     _employee: String,
 ) -> Result<String, String> {
     #[derive(serde::Deserialize)]
@@ -126,7 +131,7 @@ fn export_week_report(
         .map(|d| WeeklyWorkItem { date: d.date, contents: d.contents })
         .collect();
 
-    report::generate_week_xlsx(&start_date, &end_date, &weekly_items, &summary)?;
+    report::generate_week_xlsx(&start_date, &end_date, &weekly_items, &summary, &key_tasks, &completion_status)?;
 
     let file_name = format!("周报_{}_{}.xlsx", start_date, end_date);
     let src_path = crate::config::CONFIG_DIR
@@ -216,6 +221,43 @@ async fn summarize_week(items_json: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn generate_week_tasks(items_json: String) -> Result<(String, String), String> {
+    let config = config::load_config()?;
+
+    if config.model.base_url.trim().is_empty()
+        || config.model.api_key.trim().is_empty()
+        || config.model.model.trim().is_empty()
+    {
+        return Err("请先配置模型信息（base_url / api_key / model）".to_string());
+    }
+
+    let items: Vec<String> = serde_json::from_str(&items_json)
+        .map_err(|e| format!("解析数据失败: {}", e))?;
+
+    if items.is_empty() {
+        return Err("本周暂无工作内容".to_string());
+    }
+
+    log::info!("生成重点任务: 共 {} 条工作内容，调用模型 {}", items.len(), config.model.model);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = llm::generate_week_tasks_with_openai(
+            &config.model.base_url,
+            &config.model.api_key,
+            &config.model.model,
+            &items,
+        );
+        match &result {
+            Ok((kt, cs)) => log::info!("重点任务生成完成: key_tasks={} chars, completion={} chars", kt.len(), cs.len()),
+            Err(e) => log::error!("重点任务生成失败: {}", e),
+        }
+        result
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+#[tauri::command]
 fn get_log_path() -> Result<String, String> {
     let log_dir = config::CONFIG_DIR.lock().unwrap().clone();
     let log_path = log_dir.join("daily-paper-generator.log");
@@ -264,6 +306,7 @@ pub fn run() {
             fetch_daily_items,
             polish_daily_items,
             summarize_week,
+            generate_week_tasks,
             generate_report,
             export_week_report,
             get_log_path,

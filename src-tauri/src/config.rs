@@ -31,6 +31,13 @@ pub struct GitLabConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GiteaConfig {
+    pub base_url: String,
+    pub token: String,
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelConfig {
     pub base_url: String,
     pub api_key: String,
@@ -98,6 +105,8 @@ impl Default for PromptsConfig {
 pub struct AppConfig {
     pub jira: JiraConfig,
     pub gitlab: GitLabConfig,
+    #[serde(default)]
+    pub gitea: GiteaConfig,
     pub user_email: String,
     pub model: ModelConfig,
     #[serde(default)]

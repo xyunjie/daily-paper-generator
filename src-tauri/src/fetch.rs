@@ -4,7 +4,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct WorkItemWithSource {
     pub content: String,
-    pub source: String, // "jira" or "gitlab"
+    pub source: String, // "jira", "gitlab", or "gitea"
 }
 
 #[derive(Debug, Serialize)]
@@ -270,7 +270,7 @@ fn build_llm_input(date: &str, tasks: &[(String, String)], commits: &[String]) -
     s.push_str("【硬性要求】\n");
     s.push_str("- 输出 3-8 条中文要点，每条一行\n");
     s.push_str("- 只输出要点，不要标题/解释\n");
-    s.push_str("- 输出不得包含 Jira Key / GitLab 项目名或路径 / 提交 hash 或 short_id / URL\n");
+    s.push_str("- 输出不得包含 Jira Key / GitLab/Gitea 项目名或路径 / 提交 hash 或 short_id / URL\n");
 
     s.push_str("\n【Jira Done 任务】\n");
     if tasks.is_empty() {
@@ -281,7 +281,7 @@ fn build_llm_input(date: &str, tasks: &[(String, String)], commits: &[String]) -
         }
     }
 
-    s.push_str("\n【GitLab 提交摘要】\n");
+    s.push_str("\n【代码提交摘要】\n");
     if commits.is_empty() {
         s.push_str("(无)\n");
     } else {
@@ -300,8 +300,19 @@ fn build_llm_input(date: &str, tasks: &[(String, String)], commits: &[String]) -
 pub fn fetch_daily_items(config: &AppConfig, date: &str) -> Result<FetchedItems, String> {
     log::info!("开始自动获取: date={}", date);
 
-    let jira_tasks = crate::jira::fetch_tasks(config, date)?;
-    let gitlab_commits = crate::gitlab::fetch_commits(config, date)?;
+    let jira_tasks = if !config.jira.base_url.is_empty() {
+        crate::jira::fetch_tasks(config, date)?
+    } else {
+        Vec::new()
+    };
+
+    let gitlab_commits = if !config.gitlab.base_url.is_empty() {
+        crate::gitlab::fetch_commits(config, date)?
+    } else {
+        Vec::new()
+    };
+
+    let gitea_commits = crate::gitea::fetch_commits(config, date)?;
 
     let mut items: Vec<WorkItemWithSource> = Vec::new();
 
@@ -325,7 +336,23 @@ pub fn fetch_daily_items(config: &AppConfig, date: &str) -> Result<FetchedItems,
         }
     }
 
-    log::info!("自动获取完成: jira={} 条, gitlab={} 条, 合计={} 条", jira_tasks.len(), gitlab_commits.len(), items.len());
+    for commit in &gitea_commits {
+        let content = normalize_commit_title(&commit.title);
+        if !content.is_empty() {
+            items.push(WorkItemWithSource {
+                content,
+                source: "gitea".to_string(),
+            });
+        }
+    }
+
+    log::info!(
+        "自动获取完成: jira={} 条, gitlab={} 条, gitea={} 条, 合计={} 条",
+        jira_tasks.len(),
+        gitlab_commits.len(),
+        gitea_commits.len(),
+        items.len()
+    );
     Ok(FetchedItems { items })
 }
 
@@ -340,11 +367,11 @@ pub fn polish_daily_items(config: &AppConfig, date: &str, raw_items: &[WorkItemW
 
     let commits_titles: Vec<String> = raw_items
         .iter()
-        .filter(|i| i.source == "gitlab")
+        .filter(|i| i.source == "gitlab" || i.source == "gitea")
         .map(|i| i.content.clone())
         .collect();
 
-    log::info!("AI润色: jira={} 条, gitlab={} 条", tasks_struct.len(), commits_titles.len());
+    log::info!("AI润色: jira={} 条, 代码提交={} 条", tasks_struct.len(), commits_titles.len());
 
     let has_model = !config.model.base_url.trim().is_empty()
         && !config.model.api_key.trim().is_empty()
