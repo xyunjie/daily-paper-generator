@@ -179,6 +179,125 @@ pub fn summarize_week_with_openai(
     Ok(content.trim().to_string())
 }
 
+pub fn generate_week_tasks_with_openai(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    week_items: &[String],
+) -> Result<(String, String), String> {
+    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+    let client = Client::new();
+
+    let items_text = week_items.join("\n- ");
+    let prompt = format!(
+        "【本周工作内容】\n- {}\n\n\
+        请根据以上工作内容生成两部分：\n\
+        1. 本周重点任务（提炼 3-5 条最关键的任务/方向，每条一行）\n\
+        2. 任务完成情况（对应每条重点任务的完成状态和进展）\n\n\
+        严格按以下格式输出，不要添加额外内容：\n\
+        【重点任务】\n\
+        1. 任务描述\n\
+        2. 任务描述\n\
+        【完成情况】\n\
+        1. 已完成/进行中 + 简要说明\n\
+        2. 已完成/进行中 + 简要说明",
+        items_text
+    );
+
+    let system = "你是周报助手。请根据工作内容提炼本周重点任务和对应完成情况。\n\
+        硬性规则：\n\
+        1) 重点任务 3-5 条，概括本周主要工作方向，不要逐条罗列琐碎条目。\n\
+        2) 完成情况与重点任务一一对应，标注'已完成'或'进行中 XX%'并附简要说明。\n\
+        3) 纯中文输出，禁止出现 Jira Key、项目路径、commit hash、URL。\n\
+        4) 如实描述，不要编造没有的工作。";
+
+    let req = ChatRequest {
+        model: model.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: prompt,
+            },
+        ],
+        temperature: 0.3,
+    };
+
+    let res = client
+        .post(url)
+        .bearer_auth(api_key)
+        .json(&req)
+        .send()
+        .map_err(|e| format!("模型请求失败: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("模型接口错误: {}", res.status()));
+    }
+
+    let data: ChatResponse = res
+        .json()
+        .map_err(|e| format!("模型响应解析失败: {}", e))?;
+
+    let content = data
+        .choices
+        .get(0)
+        .map(|c| c.message.content.clone())
+        .unwrap_or_default();
+
+    // Parse the two sections
+    let content = content.trim();
+    let (key_tasks, completion_status) = parse_tasks_response(content);
+    Ok((key_tasks, completion_status))
+}
+
+fn parse_tasks_response(content: &str) -> (String, String) {
+    let mut key_tasks = String::new();
+    let mut completion = String::new();
+    let mut current_section = 0; // 0=none, 1=key_tasks, 2=completion
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains("重点任务") && trimmed.starts_with('【') {
+            current_section = 1;
+            continue;
+        }
+        if (trimmed.contains("完成情况") || trimmed.contains("完成状态"))
+            && trimmed.starts_with('【')
+        {
+            current_section = 2;
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        match current_section {
+            1 => {
+                if !key_tasks.is_empty() {
+                    key_tasks.push('\n');
+                }
+                key_tasks.push_str(trimmed);
+            }
+            2 => {
+                if !completion.is_empty() {
+                    completion.push('\n');
+                }
+                completion.push_str(trimmed);
+            }
+            _ => {}
+        }
+    }
+
+    // Fallback: if parsing failed, put everything in key_tasks
+    if key_tasks.is_empty() && completion.is_empty() {
+        key_tasks = content.to_string();
+    }
+
+    (key_tasks, completion)
+}
+
 pub fn polish_with_openai(
     base_url: &str,
     api_key: &str,

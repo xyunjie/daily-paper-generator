@@ -122,6 +122,8 @@ pub fn generate_week_xlsx(
     end_date: &str,
     items: &[WeeklyWorkItem],
     summary: &str,
+    key_tasks: &str,
+    completion_status: &str,
 ) -> Result<String, String> {
     ensure_config_dir()?;
 
@@ -218,8 +220,57 @@ pub fn generate_week_xlsx(
         worksheet
             .write_string_with_format(current_row, 1, summary, &summary_content_format)
             .map_err(|e| format!("写入总结内容失败: {}", e))?;
-        // 根据内容长度估算行高
         let line_count = summary.chars().filter(|&c| c == '\n').count() + 1;
+        worksheet.set_row_height(current_row, (line_count as f64 * 15.0).max(40.0)).ok();
+        current_row += 1;
+    }
+
+    // 写入重点任务
+    if !key_tasks.is_empty() {
+        let label_format = Format::new()
+            .set_bold()
+            .set_align(FormatAlign::Center)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_border(FormatBorder::Thin);
+
+        let content_fmt = Format::new()
+            .set_align(FormatAlign::Left)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_text_wrap()
+            .set_border(FormatBorder::Thin);
+
+        worksheet
+            .write_string_with_format(current_row, 0, "重点任务", &label_format)
+            .map_err(|e| format!("写入重点任务标签失败: {}", e))?;
+        worksheet
+            .write_string_with_format(current_row, 1, key_tasks, &content_fmt)
+            .map_err(|e| format!("写入重点任务内容失败: {}", e))?;
+        let line_count = key_tasks.chars().filter(|&c| c == '\n').count() + 1;
+        worksheet.set_row_height(current_row, (line_count as f64 * 15.0).max(40.0)).ok();
+        current_row += 1;
+    }
+
+    // 写入任务完成情况
+    if !completion_status.is_empty() {
+        let label_format = Format::new()
+            .set_bold()
+            .set_align(FormatAlign::Center)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_border(FormatBorder::Thin);
+
+        let content_fmt = Format::new()
+            .set_align(FormatAlign::Left)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_text_wrap()
+            .set_border(FormatBorder::Thin);
+
+        worksheet
+            .write_string_with_format(current_row, 0, "完成情况", &label_format)
+            .map_err(|e| format!("写入完成情况标签失败: {}", e))?;
+        worksheet
+            .write_string_with_format(current_row, 1, completion_status, &content_fmt)
+            .map_err(|e| format!("写入完成情况内容失败: {}", e))?;
+        let line_count = completion_status.chars().filter(|&c| c == '\n').count() + 1;
         worksheet.set_row_height(current_row, (line_count as f64 * 15.0).max(40.0)).ok();
     }
 

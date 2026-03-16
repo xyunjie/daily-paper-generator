@@ -34,20 +34,29 @@ export async function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       week_start TEXT NOT NULL UNIQUE,
       summary TEXT NOT NULL,
+      key_tasks TEXT DEFAULT '',
+      completion_status TEXT DEFAULT '',
       updated_at TEXT NOT NULL
     )`
   );
+  // 为已存在的周总结表添加新字段
+  try {
+    await db.execute(`ALTER TABLE week_summaries ADD COLUMN key_tasks TEXT DEFAULT ''`);
+  } catch (_e) { /* 字段已存在 */ }
+  try {
+    await db.execute(`ALTER TABLE week_summaries ADD COLUMN completion_status TEXT DEFAULT ''`);
+  } catch (_e) { /* 字段已存在 */ }
 }
 
 export interface WorkItem {
   id: number;
   work_date: string;
   content: string;
-  source: 'jira' | 'gitlab' | 'manual';
+  source: 'jira' | 'gitlab' | 'gitea' | 'manual';
   created_at: string;
 }
 
-export async function addWorkItem(workDate: string, content: string, source: 'jira' | 'gitlab' | 'manual' = 'manual') {
+export async function addWorkItem(workDate: string, content: string, source: 'jira' | 'gitlab' | 'gitea' | 'manual' = 'manual') {
   const db = await getDb();
   const createdAt = new Date().toISOString();
   await db.execute(
@@ -65,7 +74,7 @@ export async function listWorkItems(startDate: string, endDate: string) {
   return rows;
 }
 
-export async function replaceWorkItems(workDate: string, items: Array<{ content: string; source?: 'jira' | 'gitlab' | 'manual' }>) {
+export async function replaceWorkItems(workDate: string, items: Array<{ content: string; source?: 'jira' | 'gitlab' | 'gitea' | 'manual' }>) {
   const db = await getDb();
   await db.execute("DELETE FROM work_items WHERE work_date = ?", [workDate]);
   const createdAt = new Date().toISOString();
@@ -180,15 +189,28 @@ export interface WeekSummary {
   id: number;
   week_start: string;
   summary: string;
+  key_tasks: string;
+  completion_status: string;
   updated_at: string;
 }
 
-export async function saveWeekSummary(weekStart: string, summary: string) {
+export async function saveWeekSummary(
+  weekStart: string,
+  summary: string,
+  keyTasks: string = '',
+  completionStatus: string = ''
+) {
   const db = await getDb();
   const updatedAt = new Date().toISOString();
   await db.execute(
-    "INSERT OR REPLACE INTO week_summaries (week_start, summary, updated_at) VALUES (?, ?, ?)",
-    [weekStart, summary, updatedAt]
+    `INSERT INTO week_summaries (week_start, summary, key_tasks, completion_status, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(week_start) DO UPDATE SET
+       summary = excluded.summary,
+       key_tasks = excluded.key_tasks,
+       completion_status = excluded.completion_status,
+       updated_at = excluded.updated_at`,
+    [weekStart, summary, keyTasks, completionStatus, updatedAt]
   );
 }
 
@@ -199,4 +221,21 @@ export async function getWeekSummary(weekStart: string) {
     [weekStart]
   );
   return rows[0] || null;
+}
+
+export async function listWeekSummaries(limit: number, offset: number) {
+  const db = await getDb();
+  const rows = await db.select<WeekSummary[]>(
+    "SELECT * FROM week_summaries ORDER BY week_start DESC LIMIT ? OFFSET ?",
+    [limit, offset]
+  );
+  return rows;
+}
+
+export async function countWeekSummaries() {
+  const db = await getDb();
+  const rows = await db.select<{ total: number }[]>(
+    "SELECT COUNT(*) as total FROM week_summaries"
+  );
+  return Number(rows[0]?.total ?? 0);
 }
