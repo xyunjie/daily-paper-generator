@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install:*)",
+      "Bash(pnpm tauri:*)",
+      "Bash(pnpm build:*)",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__take_screenshot",
+      "Bash(cargo check:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

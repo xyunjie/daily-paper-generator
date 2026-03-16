@@ -11,7 +11,7 @@ dayjs.extend(isoWeek);
 
 interface FetchedItem {
   content: string;
-  source: "jira" | "gitlab";
+  source: "jira" | "gitlab" | "gitea";
 }
 
 interface DailyCard {
@@ -211,12 +211,14 @@ async function exportWeek() {
 function sourceLabel(source: string) {
   if (source === "jira") return "Jira";
   if (source === "gitlab") return "GitLab";
+  if (source === "gitea") return "Gitea";
   return null;
 }
 
 function sourceColor(source: string) {
   if (source === "jira") return "blue";
   if (source === "gitlab") return "orange";
+  if (source === "gitea") return "green";
   return "";
 }
 
@@ -377,7 +379,7 @@ async function handleSummarizeWeek() {
 
 .week-label {
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .actions {
@@ -439,14 +441,14 @@ async function handleSummarizeWeek() {
 }
 
 .empty-text {
-  color: #999;
+  color: var(--text-muted);
 }
 
 .week-summary-section {
   margin-top: 24px;
   padding: 16px 20px;
-  background: #fafafa;
-  border: 1px solid #e8e8e8;
+  background: var(--bg-section);
+  border: 1px solid var(--bg-section-border);
   border-radius: 8px;
 }
 
@@ -460,7 +462,7 @@ async function handleSummarizeWeek() {
 .summary-title {
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .summary-spin {
@@ -472,13 +474,13 @@ async function handleSummarizeWeek() {
 .summary-content {
   font-size: 14px;
   line-height: 1.8;
-  color: #333;
+  color: var(--text-primary);
   white-space: pre-wrap;
 }
 
 .summary-placeholder {
   font-size: 13px;
-  color: #bbb;
+  color: var(--text-placeholder);
 }
 </style>
 

@@ -17,9 +17,16 @@ interface GitLabConfig {
   user_id: string;
 }
 
+interface GiteaConfig {
+  base_url: string;
+  token: string;
+  username: string;
+}
+
 interface AppConfig {
   jira: JiraConfig;
   gitlab: GitLabConfig;
+  gitea: GiteaConfig;
   user_email: string;
   model: {
     base_url: string;
@@ -36,11 +43,17 @@ interface AppConfig {
 const config = ref<AppConfig>({
   jira: { base_url: "", email: "", api_token: "", username: "" },
   gitlab: { base_url: "", private_token: "", username: "", user_id: "" },
+  gitea: { base_url: "", token: "", username: "" },
   user_email: "",
   model: { base_url: "", api_key: "", model: "" },
   prompts: { polish_system: "", polish_few_shot: "", summary_system: "" },
 });
 const loading = ref(false);
+
+// 自动保存状态
+const saveStatus = ref<"idle" | "saving" | "saved" | "error">("idle");
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let fadeTimer: ReturnType<typeof setTimeout> | null = null;
 
 onMounted(async () => {
   loading.value = true;
@@ -49,6 +62,7 @@ onMounted(async () => {
     if (result) {
       config.value = {
         ...result,
+        gitea: result.gitea || { base_url: "", token: "", username: "" },
         prompts: result.prompts || { polish_system: "", polish_few_shot: "", summary_system: "" },
       };
     }
@@ -59,20 +73,21 @@ onMounted(async () => {
   }
 });
 
-async function saveConfig() {
-  if (!config.value.jira.base_url || !config.value.gitlab.base_url || !config.value.user_email) {
-    message.warning("请填写完整配置");
-    return;
-  }
-  loading.value = true;
-  try {
-    await invoke("save_config", { config: config.value });
-    message.success("配置已保存");
-  } catch (e) {
-    message.error(`保存失败: ${e}`);
-  } finally {
-    loading.value = false;
-  }
+function handleBlur() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    saveStatus.value = "saving";
+    if (fadeTimer) clearTimeout(fadeTimer);
+    try {
+      await invoke("save_config", { config: config.value });
+      saveStatus.value = "saved";
+    } catch (_e) {
+      saveStatus.value = "error";
+    }
+    fadeTimer = setTimeout(() => {
+      saveStatus.value = "idle";
+    }, 2000);
+  }, 300);
 }
 </script>
 
@@ -82,16 +97,16 @@ async function saveConfig() {
       <a-card title="Jira 配置" class="config-card">
         <a-form layout="vertical" :model="config" class="config-form">
           <a-form-item label="Jira URL">
-            <a-input v-model:value="config.jira.base_url" placeholder="https://your-company.atlassian.net" />
+            <a-input v-model:value="config.jira.base_url" placeholder="https://your-company.atlassian.net" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="邮箱">
-            <a-input v-model:value="config.jira.email" placeholder="your@email.com" />
+            <a-input v-model:value="config.jira.email" placeholder="your@email.com" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="API Token">
-            <a-input-password v-model:value="config.jira.api_token" placeholder="Jira API Token" />
+            <a-input-password v-model:value="config.jira.api_token" placeholder="Jira API Token" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="Jira 用户名">
-            <a-input v-model:value="config.jira.username" placeholder="例如: xuyunjie" />
+            <a-input v-model:value="config.jira.username" placeholder="例如: xuyunjie" @blur="handleBlur" />
           </a-form-item>
         </a-form>
       </a-card>
@@ -99,16 +114,30 @@ async function saveConfig() {
       <a-card title="GitLab 配置" class="config-card">
         <a-form layout="vertical" :model="config" class="config-form">
           <a-form-item label="GitLab URL">
-            <a-input v-model:value="config.gitlab.base_url" placeholder="https://gitlab.com" />
+            <a-input v-model:value="config.gitlab.base_url" placeholder="https://gitlab.com" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="Private Token">
-            <a-input-password v-model:value="config.gitlab.private_token" placeholder="GitLab Access Token" />
+            <a-input-password v-model:value="config.gitlab.private_token" placeholder="GitLab Access Token" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="GitLab 用户名">
-            <a-input v-model:value="config.gitlab.username" placeholder="例如: xuyunjie" />
+            <a-input v-model:value="config.gitlab.username" placeholder="例如: xuyunjie" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="GitLab 用户 ID">
-            <a-input v-model:value="config.gitlab.user_id" placeholder="例如: 123456" />
+            <a-input v-model:value="config.gitlab.user_id" placeholder="例如: 123456" @blur="handleBlur" />
+          </a-form-item>
+        </a-form>
+      </a-card>
+
+      <a-card title="Gitea 配置" class="config-card">
+        <a-form layout="vertical" :model="config" class="config-form">
+          <a-form-item label="Gitea URL">
+            <a-input v-model:value="config.gitea.base_url" placeholder="https://gitea.example.com" @blur="handleBlur" />
+          </a-form-item>
+          <a-form-item label="Access Token">
+            <a-input-password v-model:value="config.gitea.token" placeholder="Gitea Access Token" @blur="handleBlur" />
+          </a-form-item>
+          <a-form-item label="Gitea 用户名">
+            <a-input v-model:value="config.gitea.username" placeholder="用于过滤提交的用户名" @blur="handleBlur" />
           </a-form-item>
         </a-form>
       </a-card>
@@ -116,7 +145,7 @@ async function saveConfig() {
       <a-card title="通用配置" class="config-card">
         <a-form layout="vertical" :model="config" class="config-form">
           <a-form-item label="用户邮箱">
-            <a-input v-model:value="config.user_email" placeholder="用于查询提交记录的邮箱" />
+            <a-input v-model:value="config.user_email" placeholder="用于查询提交记录的邮箱" @blur="handleBlur" />
           </a-form-item>
         </a-form>
       </a-card>
@@ -124,13 +153,13 @@ async function saveConfig() {
       <a-card title="模型配置" class="config-card">
         <a-form layout="vertical" :model="config" class="config-form">
           <a-form-item label="Base URL">
-            <a-input v-model:value="config.model.base_url" placeholder="https://api.example.com" />
+            <a-input v-model:value="config.model.base_url" placeholder="https://api.example.com" @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="API Key">
-            <a-input-password v-model:value="config.model.api_key" placeholder="sk-..." />
+            <a-input-password v-model:value="config.model.api_key" placeholder="sk-..." @blur="handleBlur" />
           </a-form-item>
           <a-form-item label="Model">
-            <a-input v-model:value="config.model.model" placeholder="gpt-4o-mini" />
+            <a-input v-model:value="config.model.model" placeholder="gpt-4o-mini" @blur="handleBlur" />
           </a-form-item>
         </a-form>
       </a-card>
@@ -146,6 +175,7 @@ async function saveConfig() {
               v-model:value="config.prompts.polish_system"
               :rows="6"
               placeholder="留空使用默认：你是日报助手。请将输入信息整合为可直接填日报的中文要点..."
+              @blur="handleBlur"
             />
           </a-form-item>
           <a-form-item>
@@ -157,6 +187,7 @@ async function saveConfig() {
               v-model:value="config.prompts.polish_few_shot"
               :rows="8"
               placeholder="留空使用默认示例（包含输入/输出示范）"
+              @blur="handleBlur"
             />
           </a-form-item>
           <a-form-item>
@@ -168,15 +199,20 @@ async function saveConfig() {
               v-model:value="config.prompts.summary_system"
               :rows="6"
               placeholder="留空使用默认：你是工作总结助手。请将本周的工作内容整合为一段精炼的周总结..."
+              @blur="handleBlur"
             />
           </a-form-item>
         </a-form>
       </a-card>
     </div>
 
-    <div class="save-actions">
-      <a-button type="primary" @click="saveConfig" :loading="loading">保存配置</a-button>
-    </div>
+    <transition name="fade">
+      <div v-if="saveStatus !== 'idle'" class="save-indicator" :class="saveStatus">
+        <span v-if="saveStatus === 'saving'">保存中...</span>
+        <span v-else-if="saveStatus === 'saved'">已保存</span>
+        <span v-else-if="saveStatus === 'error'">保存失败</span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -185,6 +221,7 @@ async function saveConfig() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
 }
 
 .settings-grid {
@@ -208,12 +245,41 @@ async function saveConfig() {
 .prompt-hint {
   margin-left: 8px;
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
   font-weight: normal;
 }
 
-.save-actions {
-  display: flex;
-  justify-content: flex-end;
+.save-indicator {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #fff;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.save-indicator.saving {
+  background: #1677ff;
+}
+
+.save-indicator.saved {
+  background: #52c41a;
+}
+
+.save-indicator.error {
+  background: #ff4d4f;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

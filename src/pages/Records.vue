@@ -128,6 +128,7 @@ async function onPageChange(page: number, size: number) {
 
 .contents-cell {
   white-space: pre-line;
+  color: var(--text-primary);
 }
 
 .work-row td {

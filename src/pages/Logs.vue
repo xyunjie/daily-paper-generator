@@ -94,6 +94,7 @@ onUnmounted(() => {
 .logs-title {
   font-size: 18px;
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .logs-actions {
@@ -104,7 +105,7 @@ onUnmounted(() => {
 
 .log-path {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -130,7 +131,7 @@ onUnmounted(() => {
 }
 
 .log-empty {
-  color: #666;
+  color: var(--text-secondary);
   text-align: center;
   padding-top: 40px;
 }
