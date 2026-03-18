@@ -79,7 +79,15 @@ function handleBlur() {
     saveStatus.value = "saving";
     if (fadeTimer) clearTimeout(fadeTimer);
     try {
-      await invoke("save_config", { config: config.value });
+      const configToSave = {
+        ...config.value,
+        prompts: {
+          polish_system: config.value.prompts.polish_system || undefined,
+          polish_few_shot: config.value.prompts.polish_few_shot || undefined,
+          summary_system: config.value.prompts.summary_system || undefined,
+        },
+      };
+      await invoke("save_config", { config: configToSave });
       saveStatus.value = "saved";
     } catch (_e) {
       saveStatus.value = "error";

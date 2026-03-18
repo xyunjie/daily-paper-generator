@@ -324,7 +324,7 @@ async function handleSummarizeWeek() {
 
     <div class="week-summary-section">
       <div class="summary-header">
-        <span class="summary-title">本周工作总结</span>
+        <span class="summary-title">{{ weekLabel }} 工作总结</span>
         <a-button type="primary" :loading="summaryLoading" @click="handleSummarizeWeek">
           开始总结
         </a-button>

@@ -5,12 +5,12 @@ mod gitlab;
 mod jira;
 mod llm;
 mod report;
+mod utils;
 
 use config::AppConfig;
-use report::DailyReport;
 use report::WeeklyWorkItem;
 use simplelog::*;
-use std::fs::File;
+use std::fs::OpenOptions;
 
 #[tauri::command]
 fn save_config(config: AppConfig) -> Result<(), String> {
@@ -64,47 +64,6 @@ async fn polish_daily_items(date: String, items_json: String) -> Result<Vec<Stri
     })
     .await
     .map_err(|e| format!("任务执行失败: {}", e))?
-}
-
-#[tauri::command]
-fn generate_report(date: String) -> Result<String, String> {
-    log::info!("Generating report for date: {}", date);
-
-    let config = config::load_config()?;
-
-    let has_jira = !config.jira.base_url.is_empty();
-    let has_gitlab = !config.gitlab.base_url.is_empty();
-    let has_gitea = !config.gitea.base_url.is_empty();
-
-    if !has_jira && !has_gitlab && !has_gitea {
-        return Err("请至少配置一个数据源（Jira / GitLab / Gitea）".to_string());
-    }
-
-    // 获取 Jira 任务
-    log::info!("Fetching Jira tasks...");
-    let tasks = if has_jira {
-        jira::fetch_tasks(&config, &date)?
-    } else {
-        Vec::new()
-    };
-
-    // 获取 GitLab 提交
-    log::info!("Fetching GitLab commits...");
-    let commits = if has_gitlab {
-        gitlab::fetch_commits(&config, &date)?
-    } else {
-        Vec::new()
-    };
-
-    // 生成日报
-    let report = DailyReport {
-        date: date.clone(),
-        tasks,
-        commits,
-    };
-
-    let file_path = report::generate_docx(&report)?;
-    Ok(file_path)
 }
 
 #[tauri::command]
@@ -182,16 +141,20 @@ fn export_week_report(
     }
 }
 
-#[tauri::command]
-async fn summarize_week(items_json: String) -> Result<String, String> {
-    let config = config::load_config()?;
-
+fn check_model_config(config: &AppConfig) -> Result<(), String> {
     if config.model.base_url.trim().is_empty()
         || config.model.api_key.trim().is_empty()
         || config.model.model.trim().is_empty()
     {
         return Err("请先配置模型信息（base_url / api_key / model）".to_string());
     }
+    Ok(())
+}
+
+#[tauri::command]
+async fn summarize_week(items_json: String) -> Result<String, String> {
+    let config = config::load_config()?;
+    check_model_config(&config)?;
 
     let items: Vec<String> = serde_json::from_str(&items_json)
         .map_err(|e| format!("解析数据失败: {}", e))?;
@@ -223,13 +186,7 @@ async fn summarize_week(items_json: String) -> Result<String, String> {
 #[tauri::command]
 async fn generate_week_tasks(items_json: String) -> Result<(String, String), String> {
     let config = config::load_config()?;
-
-    if config.model.base_url.trim().is_empty()
-        || config.model.api_key.trim().is_empty()
-        || config.model.model.trim().is_empty()
-    {
-        return Err("请先配置模型信息（base_url / api_key / model）".to_string());
-    }
+    check_model_config(&config)?;
 
     let items: Vec<String> = serde_json::from_str(&items_json)
         .map_err(|e| format!("解析数据失败: {}", e))?;
@@ -282,7 +239,7 @@ fn init_logger() {
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join("daily-paper-generator.log");
 
-    if let Ok(file) = File::create(&log_path) {
+    if let Ok(file) = OpenOptions::new().append(true).create(true).open(&log_path) {
         let _ = WriteLogger::init(
             LevelFilter::Info,
             Config::default(),
@@ -307,7 +264,6 @@ pub fn run() {
             polish_daily_items,
             summarize_week,
             generate_week_tasks,
-            generate_report,
             export_week_report,
             get_log_path,
             read_log_file
