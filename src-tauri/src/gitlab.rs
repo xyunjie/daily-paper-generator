@@ -323,18 +323,8 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
                             }
                         }
 
-                        // 过滤：只保留指定用户的提交（如果配置了 username）
-                        if !gitlab.username.trim().is_empty() {
-                            if let Some(author_name) = &commit.author_name {
-                                if author_name != &gitlab.username {
-                                    log::debug!("Skipping commit {} (author mismatch: {} != {})", commit.short_id, author_name, gitlab.username);
-                                    continue;
-                                }
-                            } else {
-                                log::debug!("Skipping commit {} (no author_name)", commit.short_id);
-                                continue;
-                            }
-                        }
+                        // events API 模式已通过 user_id 过滤，无需再校验 author_name
+                        // （author_name 是 git 配置的姓名，与 GitLab username 不同，比较会导致全部漏过）
 
                         let title = normalize_commit_title(&commit.title);
                         if !is_merge_like_commit_title(&title) {
