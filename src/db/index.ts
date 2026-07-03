@@ -52,11 +52,11 @@ export interface WorkItem {
   id: number;
   work_date: string;
   content: string;
-  source: 'jira' | 'gitlab' | 'gitea' | 'manual';
+  source: 'jira' | 'gitlab' | 'gitea' | 'gogs' | 'manual';
   created_at: string;
 }
 
-export async function addWorkItem(workDate: string, content: string, source: 'jira' | 'gitlab' | 'gitea' | 'manual' = 'manual') {
+export async function addWorkItem(workDate: string, content: string, source: 'jira' | 'gitlab' | 'gitea' | 'gogs' | 'manual' = 'manual') {
   const db = await getDb();
   const createdAt = new Date().toISOString();
   await db.execute(
@@ -74,7 +74,7 @@ export async function listWorkItems(startDate: string, endDate: string) {
   return rows;
 }
 
-export async function replaceWorkItems(workDate: string, items: Array<{ content: string; source?: 'jira' | 'gitlab' | 'gitea' | 'manual' }>) {
+export async function replaceWorkItems(workDate: string, items: Array<{ content: string; source?: 'jira' | 'gitlab' | 'gitea' | 'gogs' | 'manual' }>) {
   const db = await getDb();
   await db.execute("DELETE FROM work_items WHERE work_date = ?", [workDate]);
   const createdAt = new Date().toISOString();

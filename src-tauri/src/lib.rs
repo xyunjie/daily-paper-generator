@@ -2,6 +2,7 @@ mod config;
 mod fetch;
 mod gitea;
 mod gitlab;
+mod gogs;
 mod jira;
 mod llm;
 mod report;
@@ -29,9 +30,10 @@ async fn fetch_daily_items(date: String) -> Result<fetch::FetchedItems, String> 
     let has_jira = !config.jira.base_url.is_empty();
     let has_gitlab = !config.gitlab.base_url.is_empty();
     let has_gitea = !config.gitea.base_url.is_empty();
+    let has_gogs = !config.gogs.base_url.is_empty();
 
-    if !has_jira && !has_gitlab && !has_gitea {
-        return Err("请至少配置一个数据源（Jira / GitLab / Gitea）".to_string());
+    if !has_jira && !has_gitlab && !has_gitea && !has_gogs {
+        return Err("请至少配置一个数据源（Jira / GitLab / Gitea / Gogs）".to_string());
     }
 
     tauri::async_runtime::spawn_blocking(move || {

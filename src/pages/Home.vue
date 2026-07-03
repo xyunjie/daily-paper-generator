@@ -11,7 +11,7 @@ dayjs.extend(isoWeek);
 
 interface FetchedItem {
   content: string;
-  source: "jira" | "gitlab" | "gitea";
+  source: "jira" | "gitlab" | "gitea" | "gogs";
 }
 
 interface DailyCard {
@@ -212,6 +212,7 @@ function sourceLabel(source: string) {
   if (source === "jira") return "Jira";
   if (source === "gitlab") return "GitLab";
   if (source === "gitea") return "Gitea";
+  if (source === "gogs") return "Gogs";
   return null;
 }
 
@@ -219,6 +220,7 @@ function sourceColor(source: string) {
   if (source === "jira") return "blue";
   if (source === "gitlab") return "orange";
   if (source === "gitea") return "green";
+  if (source === "gogs") return "purple";
   return "";
 }
 

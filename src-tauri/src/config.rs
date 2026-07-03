@@ -38,6 +38,13 @@ pub struct GiteaConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GogsConfig {
+    pub base_url: String,
+    pub token: String,
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelConfig {
     pub base_url: String,
     pub api_key: String,
@@ -107,6 +114,8 @@ pub struct AppConfig {
     pub gitlab: GitLabConfig,
     #[serde(default)]
     pub gitea: GiteaConfig,
+    #[serde(default)]
+    pub gogs: GogsConfig,
     pub user_email: String,
     pub model: ModelConfig,
     #[serde(default)]

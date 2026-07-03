@@ -23,10 +23,17 @@ interface GiteaConfig {
   username: string;
 }
 
+interface GogsConfig {
+  base_url: string;
+  token: string;
+  username: string;
+}
+
 interface AppConfig {
   jira: JiraConfig;
   gitlab: GitLabConfig;
   gitea: GiteaConfig;
+  gogs: GogsConfig;
   user_email: string;
   model: {
     base_url: string;
@@ -44,6 +51,7 @@ const config = ref<AppConfig>({
   jira: { base_url: "", email: "", api_token: "", username: "" },
   gitlab: { base_url: "", private_token: "", username: "", user_id: "" },
   gitea: { base_url: "", token: "", username: "" },
+  gogs: { base_url: "", token: "", username: "" },
   user_email: "",
   model: { base_url: "", api_key: "", model: "" },
   prompts: { polish_system: "", polish_few_shot: "", summary_system: "" },
@@ -63,6 +71,7 @@ onMounted(async () => {
       config.value = {
         ...result,
         gitea: result.gitea || { base_url: "", token: "", username: "" },
+        gogs: result.gogs || { base_url: "", token: "", username: "" },
         prompts: result.prompts || { polish_system: "", polish_few_shot: "", summary_system: "" },
       };
     }
@@ -146,6 +155,20 @@ function handleBlur() {
           </a-form-item>
           <a-form-item label="Gitea 用户名">
             <a-input v-model:value="config.gitea.username" placeholder="用于过滤提交的用户名" @blur="handleBlur" />
+          </a-form-item>
+        </a-form>
+      </a-card>
+
+      <a-card title="Gogs 配置" class="config-card">
+        <a-form layout="vertical" :model="config" class="config-form">
+          <a-form-item label="Gogs URL">
+            <a-input v-model:value="config.gogs.base_url" placeholder="https://gogs.example.com" @blur="handleBlur" />
+          </a-form-item>
+          <a-form-item label="Access Token">
+            <a-input-password v-model:value="config.gogs.token" placeholder="Gogs Access Token" @blur="handleBlur" />
+          </a-form-item>
+          <a-form-item label="Gogs 用户名">
+            <a-input v-model:value="config.gogs.username" placeholder="用于过滤提交的用户名" @blur="handleBlur" />
           </a-form-item>
         </a-form>
       </a-card>
