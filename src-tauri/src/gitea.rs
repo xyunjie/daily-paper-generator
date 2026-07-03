@@ -61,7 +61,10 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
     );
 
     let client = Client::new();
-    let base = gitea.base_url.trim_end_matches('/');
+    let base = gitea.base_url.trim().trim_end_matches('/');
+    // token 可能因复制粘贴带有首尾空白：若不 trim，会生成畸形的 "token  xxx " 头，
+    // Gitea 无法匹配从而把请求判为匿名，返回 403 "Only signed in user is allowed to call APIs."
+    let token = gitea.token.trim();
 
     // Fetch repos the user has access to
     let mut all_repos: Vec<GiteaRepo> = Vec::new();
@@ -74,7 +77,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
 
         let response = client
             .get(&url)
-            .header("Authorization", format!("token {}", gitea.token))
+            .header("Authorization", format!("token {}", token))
             .header("Accept", "application/json")
             .send()
             .map_err(|e| format!("Gitea repos request failed: {}", e))?;
@@ -82,6 +85,12 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
+            if status.as_u16() == 401 || status.as_u16() == 403 {
+                return Err(format!(
+                    "Gitea 鉴权失败（{}）：请确认 Access Token 有效且未过期、具有 read:repository 权限（Gitea 1.19+ 的细粒度 Token 需勾选对应 scope），并检查 Token 是否误带空格。原始响应：{}",
+                    status, body
+                ));
+            }
             return Err(format!("Gitea API error: {} - {}", status, body));
         }
 
@@ -111,7 +120,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
 
     for repo in &all_repos {
         // 获取该仓库所有分支
-        let branches = fetch_branches(&client, base, &gitea.token, &repo.full_name);
+        let branches = fetch_branches(&client, base, token, &repo.full_name);
 
         for branch in &branches {
             // 分页遍历该分支的 commit
@@ -132,7 +141,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
 
                 let response = match client
                     .get(&commits_url)
-                    .header("Authorization", format!("token {}", gitea.token))
+                    .header("Authorization", format!("token {}", token))
                     .header("Accept", "application/json")
                     .send()
                 {
@@ -160,17 +169,9 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
                         continue;
                     }
 
-                    // 解析 commit 本地日期
+                    // 解析 commit 日期（固定按 UTC+8 归属到自然日）
                     let raw_date = &commit.commit.author.date;
-                    let commit_local_date = chrono::DateTime::parse_from_rfc3339(raw_date)
-                        .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
-                        .unwrap_or_else(|_| {
-                            chrono::NaiveDate::parse_from_str(
-                                raw_date.get(..10).unwrap_or(""),
-                                "%Y-%m-%d",
-                            )
-                            .unwrap_or(chrono::NaiveDate::MIN)
-                        });
+                    let commit_local_date = crate::utils::to_cst_date(raw_date);
 
                     if commit_local_date >= target_date {
                         all_before_target = false;

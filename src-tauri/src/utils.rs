@@ -2,6 +2,24 @@ pub fn compact_whitespace(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// 业务固定时区：UTC+8（北京时间）。
+/// 所有「提交/事件时间戳 → 归属日期」的换算统一使用此时区，不随运行机器所在时区变化。
+pub fn cst_offset() -> chrono::FixedOffset {
+    // 8 小时 = 28800 秒，常量偏移，构造必定成功
+    chrono::FixedOffset::east_opt(8 * 3600).expect("valid +08:00 offset")
+}
+
+/// 将 RFC3339 时间字符串按 UTC+8 归一化为日期。
+/// 解析失败时退化为取字符串前 10 位（原样 YYYY-MM-DD），再失败返回 NaiveDate::MIN。
+pub fn to_cst_date(raw: &str) -> chrono::NaiveDate {
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.with_timezone(&cst_offset()).date_naive())
+        .unwrap_or_else(|_| {
+            chrono::NaiveDate::parse_from_str(raw.get(..10).unwrap_or(""), "%Y-%m-%d")
+                .unwrap_or(chrono::NaiveDate::MIN)
+        })
+}
+
 pub fn looks_like_jira_key(s: &str) -> bool {
     // e.g. ABC-123
     let bytes = s.as_bytes();

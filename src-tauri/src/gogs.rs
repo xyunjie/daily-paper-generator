@@ -66,16 +66,6 @@ fn is_merge_like(title: &str) -> bool {
         || lower.contains("merge remote-tracking")
 }
 
-/// 将提交时间字符串解析为本地日期（RFC3339 优先，退化为前 10 位 YYYY-MM-DD）
-fn parse_local_date(raw: &str) -> chrono::NaiveDate {
-    chrono::DateTime::parse_from_rfc3339(raw)
-        .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
-        .unwrap_or_else(|_| {
-            chrono::NaiveDate::parse_from_str(raw.get(..10).unwrap_or(""), "%Y-%m-%d")
-                .unwrap_or(chrono::NaiveDate::MIN)
-        })
-}
-
 pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, String> {
     let gogs = &config.gogs;
 
@@ -91,7 +81,9 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
     );
 
     let client = Client::new();
-    let base = gogs.base_url.trim_end_matches('/');
+    let base = gogs.base_url.trim().trim_end_matches('/');
+    // token 若带首尾空白会被判为匿名请求（403），统一 trim 后再用
+    let token = gogs.token.trim();
 
     let target_date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .map_err(|e| format!("Invalid date format: {}", e))?;
@@ -100,7 +92,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
     let repos_url = format!("{}/api/v1/user/repos", base);
     let response = client
         .get(&repos_url)
-        .header("Authorization", format!("token {}", gogs.token))
+        .header("Authorization", format!("token {}", token))
         .header("Accept", "application/json")
         .send()
         .map_err(|e| format!("Gogs repos request failed: {}", e))?;
@@ -108,6 +100,12 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(format!(
+                "Gogs 鉴权失败（{}）：请确认 Access Token 有效且未过期，并检查 Token 是否误带空格。原始响应：{}",
+                status, body
+            ));
+        }
         return Err(format!("Gogs API error: {} - {}", status, body));
     }
 
@@ -131,7 +129,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
             break;
         }
 
-        let branches = fetch_branches(&client, base, &gogs.token, &repo.full_name);
+        let branches = fetch_branches(&client, base, token, &repo.full_name);
         let mut repo_walk = 0usize;
 
         for branch in &branches {
@@ -141,7 +139,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
             };
 
             // tip 早于目标日期 → 整条分支不可能有目标日期提交，直接跳过
-            if !tip.timestamp.is_empty() && parse_local_date(&tip.timestamp) < target_date {
+            if !tip.timestamp.is_empty() && crate::utils::to_cst_date(&tip.timestamp) < target_date {
                 continue;
             }
 
@@ -164,12 +162,12 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
                 total_walk += 1;
 
                 let commit =
-                    match fetch_single_commit(&client, base, &gogs.token, &repo.full_name, &sha) {
+                    match fetch_single_commit(&client, base, token, &repo.full_name, &sha) {
                         Some(c) => c,
                         None => continue,
                     };
 
-                let commit_local_date = parse_local_date(&commit.commit.author.date);
+                let commit_local_date = crate::utils::to_cst_date(&commit.commit.author.date);
 
                 // 提交日期 >= 目标日期时继续回溯其父提交（更早的历史）
                 if commit_local_date >= target_date {

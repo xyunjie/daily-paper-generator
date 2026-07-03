@@ -87,7 +87,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
 
     let projects_response = client
         .get(&projects_url)
-        .header("PRIVATE-TOKEN", &gitlab.private_token)
+        .header("PRIVATE-TOKEN", gitlab.private_token.trim())
         .header("Accept", "application/json")
         .send()
         .map_err(|e| format!("GitLab projects request failed: {}", e))?;
@@ -112,7 +112,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
     for project in &projects {
         let commits_url = if !gitlab.username.trim().is_empty() {
             format!(
-                "{}/api/v4/projects/{}/repository/commits?since={}T00:00:00Z&until={}T23:59:59Z&author_username={}",
+                "{}/api/v4/projects/{}/repository/commits?since={}T00:00:00%2B08:00&until={}T23:59:59%2B08:00&author_username={}",
                 gitlab.base_url.trim_end_matches('/'),
                 project.id,
                 date,
@@ -121,7 +121,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
             )
         } else {
             format!(
-                "{}/api/v4/projects/{}/repository/commits?since={}T00:00:00Z&until={}T23:59:59Z&author_email={}",
+                "{}/api/v4/projects/{}/repository/commits?since={}T00:00:00%2B08:00&until={}T23:59:59%2B08:00&author_email={}",
                 gitlab.base_url.trim_end_matches('/'),
                 project.id,
                 date,
@@ -132,7 +132,7 @@ pub fn fetch_commits(config: &AppConfig, date: &str) -> Result<Vec<CommitInfo>, 
 
         if let Ok(commits_response) = client
             .get(&commits_url)
-            .header("PRIVATE-TOKEN", &gitlab.private_token)
+            .header("PRIVATE-TOKEN", gitlab.private_token.trim())
             .header("Accept", "application/json")
             .send()
         {
@@ -197,7 +197,7 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
 
     let response = client
         .get(&url)
-        .header("PRIVATE-TOKEN", &gitlab.private_token)
+        .header("PRIVATE-TOKEN", gitlab.private_token.trim())
         .header("Accept", "application/json")
         .send()
         .map_err(|e| format!("GitLab events request failed: {}", e))?;
@@ -253,7 +253,7 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
         );
         if let Ok(project_response) = client
             .get(&project_url)
-            .header("PRIVATE-TOKEN", &gitlab.private_token)
+            .header("PRIVATE-TOKEN", gitlab.private_token.trim())
             .header("Accept", "application/json")
             .send()
         {
@@ -293,7 +293,7 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
 
         if let Ok(response) = client
             .get(&commits_url)
-            .header("PRIVATE-TOKEN", &gitlab.private_token)
+            .header("PRIVATE-TOKEN", gitlab.private_token.trim())
             .header("Accept", "application/json")
             .send()
         {
@@ -312,15 +312,20 @@ fn fetch_commits_by_events(config: &AppConfig, date: &str) -> Result<Vec<CommitI
                             }
                         }
 
-                        // 过滤：只保留当天的提交
-                        let commit_date = commit.authored_date.as_ref().or(Some(&commit.created_at));
-                        if let Some(commit_datetime) = commit_date {
-                            // 提取日期部分（YYYY-MM-DD）
-                            let commit_date_str = &commit_datetime[..10];
-                            if commit_date_str != date {
-                                log::debug!("Skipping commit {} (date mismatch: {} != {})", commit.short_id, commit_date_str, date);
-                                continue;
-                            }
+                        // 过滤：只保留当天（固定按 UTC+8 归属）的提交
+                        let commit_datetime = commit
+                            .authored_date
+                            .as_deref()
+                            .unwrap_or(&commit.created_at);
+                        let commit_cst_date = crate::utils::to_cst_date(commit_datetime);
+                        if commit_cst_date != date_obj {
+                            log::debug!(
+                                "Skipping commit {} (date mismatch: {} != {})",
+                                commit.short_id,
+                                commit_cst_date,
+                                date_obj
+                            );
+                            continue;
                         }
 
                         // events API 模式已通过 user_id 过滤，无需再校验 author_name
